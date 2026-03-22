@@ -8,238 +8,280 @@
 </head>
 <body>
 
-  <!-- ===== LOGIN SCREEN ===== -->
-  <div id="loginScreen">
-    <div class="login-box">
-      <div class="login-icon">💰</div>
-      <h1>Control de Caja</h1>
-      <p class="login-sub">Ingrese su contraseña para acceder</p>
-      <input type="password" id="passInput" class="form-control" placeholder="Contraseña"
-        onkeypress="if(event.key==='Enter') login()">
-      <button class="btn btn-primary btn-block" onclick="login()">Ingresar</button>
-      <p id="loginError" class="error-msg">Contraseña incorrecta</p>
-    </div>
+<!-- ===== LOGIN ===== -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-icon">💰</div>
+    <h1>Control de Caja</h1>
+    <p class="login-sub">Ingrese su contraseña para acceder</p>
+    <input type="password" id="passInput" class="form-control" placeholder="Contraseña"
+      onkeypress="if(event.key==='Enter') login()">
+    <button class="btn btn-primary btn-block" onclick="login()">Ingresar</button>
+    <p id="loginError" class="error-msg">Contraseña incorrecta</p>
   </div>
+</div>
 
-  <!-- ===== MAIN APP ===== -->
-  <div id="mainApp">
+<!-- ===== MAIN APP ===== -->
+<div id="mainApp">
 
-    <header class="app-header">
-      <h1>Control de Caja</h1>
-      <div class="header-right">
-        <span id="headerDate" class="header-date"></span>
-        <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
-      </div>
-    </header>
-
-    <div class="app-tabs">
-      <button class="tab-btn active" id="tabBtnApertura" onclick="switchTab('apertura')">📂 Apertura de Caja</button>
-      <button class="tab-btn" id="tabBtnCierre" onclick="switchTab('cierre')">📊 Cierre de Caja</button>
+  <header class="app-header">
+    <h1>💰 Control de Caja</h1>
+    <div class="header-right">
+      <span id="headerDate" class="header-date"></span>
+      <button class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
+      <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
     </div>
+  </header>
 
-    <div class="app-content">
+  <div class="app-content">
 
-      <!-- ========== APERTURA TAB ========== -->
-      <div id="tabApertura" class="tab-panel">
+    <!-- ========== VISTA: APERTURA ========== -->
+    <div id="viewApertura" class="view hidden">
+      <div class="section-header">
+        <div class="status-badge status-closed">● Caja cerrada</div>
+        <h2>Apertura de Caja</h2>
+        <p class="section-sub">Complete los datos para abrir la caja del día</p>
+      </div>
 
-        <div class="section-header">
-          <h2>Apertura de Caja</h2>
-          <p class="section-sub">Complete los datos de inicio para abrir la caja</p>
+      <!-- Caja Inicial -->
+      <div class="card">
+        <div class="card-head">
+          <h3>Caja Inicial</h3>
+          <div class="toggle-group">
+            <button class="tgl active" id="tglInicialMonto" onclick="setMode('inicial','monto')">Monto exacto</button>
+            <button class="tgl" id="tglInicialDenom" onclick="setMode('inicial','denom')">Por denominaciones</button>
+          </div>
         </div>
-
-        <!-- Caja Inicial -->
-        <div class="card">
-          <div class="card-head">
-            <h3>Caja Inicial</h3>
-            <div class="toggle-group">
-              <button class="tgl active" id="tglInicialMonto" onclick="setMode('inicial','monto')">Monto exacto</button>
-              <button class="tgl" id="tglInicialDenom" onclick="setMode('inicial','denom')">Por denominaciones</button>
+        <div class="card-body">
+          <div id="inicialModoMonto">
+            <div class="input-wrap">
+              <span class="prefix">S/.</span>
+              <input type="number" id="cajaInicialExacto" class="form-control" placeholder="0.00" min="0" step="0.01">
             </div>
           </div>
-          <div class="card-body">
-            <div id="inicialModoMonto">
-              <div class="form-group">
-                <label>Monto (S/.)</label>
-                <div class="input-wrap">
-                  <span class="prefix">S/.</span>
-                  <input type="number" id="cajaInicialExacto" class="form-control" placeholder="0.00" min="0" step="0.01">
-                </div>
-              </div>
-            </div>
-            <div id="inicialModoDenom" class="hidden">
-              <div id="inicialDenomTable"></div>
-              <div class="denom-footer">
-                <span>Total Caja Inicial</span>
-                <span class="denom-total-val" id="inicialDenomTotal">S/. 0.00</span>
-              </div>
+          <div id="inicialModoDenom" class="hidden">
+            <div id="inicialDenomTable"></div>
+            <div class="denom-footer">
+              <span>Total Caja Inicial</span>
+              <span class="denom-total-val" id="inicialDenomTotal">S/. 0.00</span>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Ventas hasta ahora -->
-        <div class="card">
-          <div class="card-head"><h3>Ventas hasta ahora</h3></div>
-          <div class="card-body">
-            <div class="form-group">
-              <label>Monto acumulado de ventas (S/.)</label>
-              <div class="input-wrap">
-                <span class="prefix">S/.</span>
-                <input type="number" id="ventasHastaAhora" class="form-control" placeholder="0.00" min="0" step="0.01">
-              </div>
+      <!-- Ventas hasta ahora -->
+      <div class="card">
+        <div class="card-head"><h3>Ventas hasta ahora</h3></div>
+        <div class="card-body">
+          <label class="field-label">Monto acumulado de ventas (S/.)</label>
+          <div class="input-wrap">
+            <span class="prefix">S/.</span>
+            <input type="number" id="ventasHastaAhora" class="form-control" placeholder="0.00" min="0" step="0.01">
+          </div>
+        </div>
+      </div>
+
+      <!-- Último Yape -->
+      <div class="card">
+        <div class="card-head"><h3>Último Yape registrado</h3></div>
+        <div class="card-body">
+          <label class="field-label">Monto del último Yape (S/.)</label>
+          <div class="input-wrap">
+            <span class="prefix">S/.</span>
+            <input type="number" id="ultimoYape" class="form-control" placeholder="0.00" min="0" step="0.01">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary btn-lg" onclick="guardarApertura()">Abrir Caja</button>
+      </div>
+    </div><!-- /viewApertura -->
+
+
+    <!-- ========== VISTA: CIERRE ========== -->
+    <div id="viewCierre" class="view hidden">
+      <div class="section-header">
+        <div class="status-badge status-open">● Caja abierta</div>
+        <h2>Cierre de Caja</h2>
+        <p class="section-sub">Complete el cierre paso a paso</p>
+      </div>
+
+      <!-- Resumen apertura -->
+      <div class="card card-info">
+        <div class="card-head"><h3>Datos de Apertura</h3></div>
+        <div class="card-body">
+          <div class="info-grid" id="resumenGrid"></div>
+        </div>
+      </div>
+
+      <!-- PASO 1: Ventas Final -->
+      <div class="card">
+        <div class="card-head"><h3><span class="step-num">1</span> Monto de Ventas Final</h3></div>
+        <div class="card-body">
+          <label class="field-label">Total de ventas al cierre (S/.)</label>
+          <div class="input-wrap">
+            <span class="prefix">S/.</span>
+            <input type="number" id="ventasFinal" class="form-control" placeholder="0.00" min="0" step="0.01" oninput="calcularEsperado()">
+          </div>
+        </div>
+      </div>
+
+      <!-- PASO 2: Yapes -->
+      <div class="card">
+        <div class="card-head"><h3><span class="step-num">2</span> Yapes Recibidos</h3></div>
+        <div class="card-body">
+          <label class="field-label">Ingrese los montos separados por comas</label>
+          <textarea id="yapesInput" class="form-control" rows="3"
+            placeholder="Ej: 15.50, 30.00, 8.75, 100" oninput="onYapesInput()"></textarea>
+          <div id="yapesChips" class="chips-wrap"></div>
+          <div class="inline-total">
+            <span>Total Yapes</span>
+            <span class="inline-amount" id="totalYapesDisplay">S/. 0.00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- PASO 3: Efectivo Esperado (calculado automáticamente) -->
+      <div class="card card-expected">
+        <div class="card-head"><h3><span class="step-num">3</span> Efectivo Esperado en Caja</h3></div>
+        <div class="card-body">
+          <div class="formula-box">
+            <div class="f-row">
+              <span class="f-label">Ventas Final</span>
+              <span class="f-val" id="fVF">S/. 0.00</span>
+            </div>
+            <div class="f-row f-minus">
+              <span class="f-label">− Ventas hasta ahora</span>
+              <span class="f-val" id="fVHA">S/. 0.00</span>
+            </div>
+            <div class="f-row f-minus">
+              <span class="f-label">− Total Yapes</span>
+              <span class="f-val" id="fTY">S/. 0.00</span>
+            </div>
+            <div class="f-row f-plus">
+              <span class="f-label">+ Caja Inicial</span>
+              <span class="f-val" id="fCI">S/. 0.00</span>
+            </div>
+            <hr class="f-line">
+            <div class="f-row f-total">
+              <span class="f-label">= Efectivo esperado en caja</span>
+              <span class="f-val f-expected-val" id="fEsperado">S/. 0.00</span>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Último Yape -->
-        <div class="card">
-          <div class="card-head"><h3>Último Yape</h3></div>
-          <div class="card-body">
-            <div class="form-group">
-              <label>Monto del último Yape registrado (S/.)</label>
-              <div class="input-wrap">
-                <span class="prefix">S/.</span>
-                <input type="number" id="ultimoYape" class="form-control" placeholder="0.00" min="0" step="0.01">
-              </div>
+      <!-- PASO 4: Efectivo Real -->
+      <div class="card">
+        <div class="card-head">
+          <h3><span class="step-num">4</span> Efectivo Real en Caja</h3>
+          <div class="toggle-group">
+            <button class="tgl active" id="tglCierreDenom" onclick="setMode('cierre','denom')">Por denominaciones</button>
+            <button class="tgl" id="tglCierreMonto" onclick="setMode('cierre','monto')">Monto exacto</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="cierreModoDenom">
+            <div id="cierreDenomTable"></div>
+            <div class="denom-footer">
+              <span>Total Efectivo Real</span>
+              <span class="denom-total-val" id="cierreDenomTotal">S/. 0.00</span>
+            </div>
+          </div>
+          <div id="cierreModoMonto" class="hidden">
+            <label class="field-label">Monto total en caja (S/.)</label>
+            <div class="input-wrap">
+              <span class="prefix">S/.</span>
+              <input type="number" id="cajaFinalExacto" class="form-control" placeholder="0.00" min="0" step="0.01" oninput="calcularDiferencia()">
             </div>
           </div>
         </div>
+      </div>
 
-        <div class="form-actions">
-          <button class="btn btn-primary btn-lg" onclick="guardarApertura()">Guardar Apertura de Caja</button>
-        </div>
-
-        <div id="alertApertura" class="alert alert-success hidden">
-          ✅ Apertura guardada. Ya puede ir a la pestaña "Cierre de Caja" cuando lo necesite.
-        </div>
-
-      </div><!-- /tabApertura -->
-
-
-      <!-- ========== CIERRE TAB ========== -->
-      <div id="tabCierre" class="tab-panel hidden">
-
-        <div class="section-header">
-          <h2>Cierre de Caja</h2>
-          <p class="section-sub">Complete los datos para cerrar la caja y generar el reporte PDF</p>
-        </div>
-
-        <!-- Resumen apertura -->
-        <div class="card card-info" id="cardResumenApertura" style="display:none">
-          <div class="card-head"><h3>ℹ️ Datos de Apertura guardados</h3></div>
-          <div class="card-body">
-            <div class="info-grid" id="resumenGrid"></div>
-          </div>
-        </div>
-
-        <div class="card card-warn" id="cardSinApertura" style="display:none">
-          <div class="card-body">
-            ⚠️ No hay apertura guardada. Los valores de caja inicial y ventas hasta ahora serán <strong>S/. 0.00</strong>.
-            Puede ir a la pestaña <strong>Apertura de Caja</strong> para ingresarlos primero.
-          </div>
-        </div>
-
-        <!-- Efectivo en caja al cierre -->
-        <div class="card">
-          <div class="card-head">
-            <h3>Efectivo en Caja al Cierre</h3>
-            <div class="toggle-group">
-              <button class="tgl active" id="tglCierreMonto" onclick="setMode('cierre','monto')">Monto exacto</button>
-              <button class="tgl" id="tglCierreDenom" onclick="setMode('cierre','denom')">Por denominaciones</button>
+      <!-- PASO 5: Resultado / Diferencia -->
+      <div class="card card-diff" id="cardDiff">
+        <div class="card-head"><h3><span class="step-num">5</span> Resultado</h3></div>
+        <div class="card-body">
+          <div class="diff-compare">
+            <div class="diff-compare-item">
+              <span class="diff-compare-label">Efectivo esperado</span>
+              <span class="diff-compare-val" id="diffEsperado">S/. 0.00</span>
+            </div>
+            <div class="diff-compare-sep">vs</div>
+            <div class="diff-compare-item">
+              <span class="diff-compare-label">Efectivo real</span>
+              <span class="diff-compare-val" id="diffReal">S/. 0.00</span>
             </div>
           </div>
-          <div class="card-body">
-            <div id="cierreModoMonto">
-              <div class="form-group">
-                <label>Monto (S/.)</label>
-                <div class="input-wrap">
-                  <span class="prefix">S/.</span>
-                  <input type="number" id="cajaFinalExacto" class="form-control" placeholder="0.00" min="0" step="0.01" oninput="calcular()">
-                </div>
-              </div>
-            </div>
-            <div id="cierreModoDenom" class="hidden">
-              <div id="cierreDenomTable"></div>
-              <div class="denom-footer">
-                <span>Total Efectivo Cierre</span>
-                <span class="denom-total-val" id="cierreDenomTotal">S/. 0.00</span>
-              </div>
+          <div class="diff-result" id="diffResult">
+            <span class="diff-icon" id="diffIcon">—</span>
+            <div class="diff-text-group">
+              <span class="diff-text" id="diffText">Ingrese los montos para ver el resultado</span>
+              <span class="diff-amount" id="diffAmount"></span>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Monto de ventas final -->
-        <div class="card">
-          <div class="card-head"><h3>Monto de Ventas Final</h3></div>
-          <div class="card-body">
-            <div class="form-group">
-              <label>Total de ventas al cierre (S/.)</label>
-              <div class="input-wrap">
-                <span class="prefix">S/.</span>
-                <input type="number" id="ventasFinal" class="form-control" placeholder="0.00" min="0" step="0.01" oninput="calcular()">
-              </div>
-            </div>
+      <div class="form-actions">
+        <button class="btn btn-success btn-lg" onclick="cerrarCaja()">📄 Cerrar Caja y Generar PDF</button>
+      </div>
+    </div><!-- /viewCierre -->
+
+
+    <!-- ========== VISTA: REPORTES ========== -->
+    <div id="viewReportes" class="view hidden">
+      <div class="section-header-row">
+        <div>
+          <h2>Historial de Reportes</h2>
+          <p class="section-sub">Todos los cierres de caja registrados</p>
+        </div>
+        <button class="btn btn-secondary" onclick="showView('auto')">← Volver</button>
+      </div>
+
+      <div class="card">
+        <div class="card-body filter-row">
+          <div class="filter-group">
+            <label>Desde</label>
+            <input type="date" id="filtroDesde" class="form-control-sm" onchange="renderReportes()">
+          </div>
+          <div class="filter-group">
+            <label>Hasta</label>
+            <input type="date" id="filtroHasta" class="form-control-sm" onchange="renderReportes()">
+          </div>
+          <div class="filter-btns">
+            <button class="btn btn-secondary btn-sm" onclick="limpiarFiltros()">Limpiar</button>
+            <button class="btn btn-excel btn-sm" onclick="exportarExcel()">📊 Exportar Excel</button>
           </div>
         </div>
+      </div>
 
-        <!-- Yapes -->
-        <div class="card">
-          <div class="card-head"><h3>Yapes Recibidos</h3></div>
-          <div class="card-body">
-            <div class="form-group">
-              <label>Ingrese los montos separados por comas</label>
-              <textarea id="yapesInput" class="form-control" rows="3"
-                placeholder="Ej: 15.50, 30.00, 8.75, 100" oninput="onYapesInput()"></textarea>
-            </div>
-            <div id="yapesChips" class="chips-wrap"></div>
-            <div class="inline-total">
-              <span>Total Yapes</span>
-              <span class="inline-amount" id="totalYapesDisplay">S/. 0.00</span>
-            </div>
-          </div>
-        </div>
+      <div class="table-wrap">
+        <table class="reportes-table">
+          <thead>
+            <tr>
+              <th>Fecha Cierre</th>
+              <th>Caja Inicial</th>
+              <th>Vtas. hasta ahora</th>
+              <th>Ventas Final</th>
+              <th>Total Yapes</th>
+              <th>Esperado</th>
+              <th>Real</th>
+              <th>Diferencia</th>
+            </tr>
+          </thead>
+          <tbody id="reportesTbody"></tbody>
+        </table>
+        <p id="noReportes" class="no-data hidden">No hay reportes registrados aún.</p>
+      </div>
+    </div><!-- /viewReportes -->
 
-        <!-- Resultado -->
-        <div class="card card-result">
-          <div class="card-head"><h3>Resultado del Cierre</h3></div>
-          <div class="card-body">
-            <div class="formula-box">
-              <div class="f-row">
-                <span class="f-label">Ventas Final</span>
-                <span class="f-val" id="fVF">S/. 0.00</span>
-              </div>
-              <div class="f-row f-minus">
-                <span class="f-label">− Ventas hasta ahora</span>
-                <span class="f-val" id="fVHA">S/. 0.00</span>
-              </div>
-              <div class="f-row f-minus">
-                <span class="f-label">− Total Yapes</span>
-                <span class="f-val" id="fTY">S/. 0.00</span>
-              </div>
-              <div class="f-row f-plus">
-                <span class="f-label">+ Caja Inicial</span>
-                <span class="f-val" id="fCI">S/. 0.00</span>
-              </div>
-              <hr class="f-line">
-              <div class="f-row f-total">
-                <span class="f-label">= Resultado</span>
-                <span class="f-val f-result" id="fResultado">S/. 0.00</span>
-              </div>
-            </div>
-          </div>
-        </div>
+  </div><!-- /app-content -->
+</div><!-- /mainApp -->
 
-        <div class="form-actions">
-          <button class="btn btn-success btn-lg" onclick="cerrarCaja()">
-            📄 Cerrar Caja y Generar PDF
-          </button>
-        </div>
-
-      </div><!-- /tabCierre -->
-
-    </div><!-- /app-content -->
-  </div><!-- /mainApp -->
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

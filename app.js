@@ -20,30 +20,27 @@ const DENOMS = [
 ];
 
 // ============================================================
-//  APP STATE
+//  STATE
 // ============================================================
 let state = {
-  // Apertura data
-  cajaInicial:       0,
-  ventasHastaAhora:  0,
-  ultimoYape:        0,
-  aperturaGuardada:  false,
-  aperturaFecha:     null,
-  inicialMode:       'monto',   // 'monto' | 'denom'
-  inicialBreakdown:  null,
-
-  // Current mode selectors
-  cierreMode: 'monto',  // 'monto' | 'denom'
+  cajaAbierta:      false,
+  cajaInicial:      0,
+  ventasHastaAhora: 0,
+  ultimoYape:       0,
+  aperturaFecha:    null,
+  inicialMode:      'monto',
+  inicialBreakdown: null,
 };
+
+let cierreMode = 'denom'; // denomination is default for closing
 
 // ============================================================
 //  INIT
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
   buildDenomTable('inicial', 'inicialDenomTable');
-  buildDenomTable('cierre', 'cierreDenomTable');
+  buildDenomTable('cierre',  'cierreDenomTable');
 
-  // Header date
   const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
   document.getElementById('headerDate').textContent =
     new Date().toLocaleDateString('es-PE', opts);
@@ -58,10 +55,10 @@ function login() {
   const input = document.getElementById('passInput');
   if (input.value === PASSWORD) {
     document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('mainApp').style.display = 'block';
+    document.getElementById('mainApp').style.display    = 'block';
     document.getElementById('loginError').style.display = 'none';
-    loadApertura();
-    calcular();
+    loadState();
+    showView('auto');
   } else {
     document.getElementById('loginError').style.display = 'block';
     input.value = '';
@@ -73,48 +70,74 @@ function login() {
 
 function logout() {
   document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('mainApp').style.display = 'none';
+  document.getElementById('mainApp').style.display     = 'none';
   document.getElementById('passInput').value = '';
 }
 
 // ============================================================
-//  TABS
+//  VIEWS  (apertura | cierre | reportes | auto)
 // ============================================================
-function switchTab(tab) {
-  const isApertura = tab === 'apertura';
-  document.getElementById('tabApertura').classList.toggle('hidden', !isApertura);
-  document.getElementById('tabCierre').classList.toggle('hidden', isApertura);
-  document.getElementById('tabBtnApertura').classList.toggle('active', isApertura);
-  document.getElementById('tabBtnCierre').classList.toggle('active', !isApertura);
+function showView(view) {
+  if (view === 'auto') view = state.cajaAbierta ? 'cierre' : 'apertura';
 
-  if (!isApertura) {
-    renderResumenApertura();
-    calcular();
-  }
+  ['viewApertura', 'viewCierre', 'viewReportes'].forEach(id =>
+    document.getElementById(id).classList.add('hidden')
+  );
+
+  const cap = view.charAt(0).toUpperCase() + view.slice(1);
+  document.getElementById('view' + cap).classList.remove('hidden');
+
+  if (view === 'cierre')   { renderResumen(); calcularEsperado(); }
+  if (view === 'reportes') renderReportes();
 }
 
 // ============================================================
-//  INPUT MODE TOGGLE (monto / denom)
+//  INPUT MODE TOGGLE
 // ============================================================
 function setMode(section, mode) {
   if (section === 'inicial') {
     state.inicialMode = mode;
-    document.getElementById('inicialModoMonto').classList.toggle('hidden', mode !== 'monto');
-    document.getElementById('inicialModoDenom').classList.toggle('hidden', mode !== 'denom');
+    toggle('inicialModoMonto', mode === 'monto');
+    toggle('inicialModoDenom', mode === 'denom');
     document.getElementById('tglInicialMonto').classList.toggle('active', mode === 'monto');
     document.getElementById('tglInicialDenom').classList.toggle('active', mode === 'denom');
   } else {
-    state.cierreMode = mode;
-    document.getElementById('cierreModoMonto').classList.toggle('hidden', mode !== 'monto');
-    document.getElementById('cierreModoDenom').classList.toggle('hidden', mode !== 'denom');
-    document.getElementById('tglCierreMonto').classList.toggle('active', mode === 'monto');
+    cierreMode = mode;
+    toggle('cierreModoDenom', mode === 'denom');
+    toggle('cierreModoMonto', mode === 'monto');
     document.getElementById('tglCierreDenom').classList.toggle('active', mode === 'denom');
-    calcular();
+    document.getElementById('tglCierreMonto').classList.toggle('active', mode === 'monto');
+    calcularDiferencia();
   }
 }
 
+function toggle(id, show) {
+  document.getElementById(id).classList.toggle('hidden', !show);
+}
+
 // ============================================================
-//  DENOMINATION TABLE
+//  STATE PERSISTENCE
+// ============================================================
+function saveState() {
+  try { localStorage.setItem('cajaState', JSON.stringify(state)); } catch (e) {}
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem('cajaState');
+    if (!raw) return;
+    Object.assign(state, JSON.parse(raw));
+    if (state.cajaAbierta) {
+      setMode('inicial', state.inicialMode || 'monto');
+      document.getElementById('cajaInicialExacto').value = state.cajaInicial      || 0;
+      document.getElementById('ventasHastaAhora').value  = state.ventasHastaAhora || 0;
+      document.getElementById('ultimoYape').value        = state.ultimoYape        || 0;
+    }
+  } catch (e) {}
+}
+
+// ============================================================
+//  DENOMINATION TABLES
 // ============================================================
 function buildDenomTable(section, containerId) {
   const container = document.getElementById(containerId);
@@ -122,44 +145,34 @@ function buildDenomTable(section, containerId) {
 
   let html = `<div class="denom-table">
     <div class="denom-th">
-      <span>Denominación</span>
-      <span style="text-align:center">Cantidad</span>
-      <span>Subtotal</span>
+      <span>Denominación</span><span style="text-align:center">Cantidad</span><span>Subtotal</span>
     </div>`;
 
   let lastTipo = '';
   DENOMS.forEach((d, i) => {
     if (d.tipo !== lastTipo) {
-      const icon = d.tipo === 'Moneda' ? '🪙' : '💵';
-      html += `<div class="denom-sep">${icon} ${d.tipo}s</div>`;
+      html += `<div class="denom-sep">${d.tipo === 'Moneda' ? '🪙' : '💵'} ${d.tipo}s</div>`;
       lastTipo = d.tipo;
     }
     html += `
       <div class="denom-row">
         <span class="denom-lbl">${d.label}</span>
         <input class="denom-qty" type="number" id="${section}Qty${i}"
-          min="0" value="" placeholder="0"
-          oninput="onDenomInput('${section}', ${i})">
+          min="0" value="" placeholder="0" oninput="onDenomInput('${section}',${i})">
         <span class="denom-sub" id="${section}Sub${i}">S/. 0.00</span>
       </div>`;
   });
-
   html += '</div>';
   container.innerHTML = html;
 }
 
 function onDenomInput(section, idx) {
   const qty = parseFloat(document.getElementById(`${section}Qty${idx}`).value) || 0;
-  const sub = round2(qty * DENOMS[idx].val);
-  document.getElementById(`${section}Sub${idx}`).textContent = fmt(sub);
-  refreshDenomTotal(section);
-  if (section === 'cierre') calcular();
-}
-
-function refreshDenomTotal(section) {
-  const total = getDenomTotal(section);
-  const elId = section === 'inicial' ? 'inicialDenomTotal' : 'cierreDenomTotal';
-  document.getElementById(elId).textContent = fmt(total);
+  document.getElementById(`${section}Sub${idx}`).textContent = fmt(round2(qty * DENOMS[idx].val));
+  const total   = getDenomTotal(section);
+  const totalId = section === 'inicial' ? 'inicialDenomTotal' : 'cierreDenomTotal';
+  document.getElementById(totalId).textContent = fmt(total);
+  if (section === 'cierre') calcularDiferencia();
 }
 
 function getDenomTotal(section) {
@@ -187,9 +200,17 @@ function getCajaInicial() {
 }
 
 function getCajaFinal() {
-  return state.cierreMode === 'monto'
-    ? (parseFloat(document.getElementById('cajaFinalExacto').value) || 0)
-    : getDenomTotal('cierre');
+  return cierreMode === 'denom'
+    ? getDenomTotal('cierre')
+    : (parseFloat(document.getElementById('cajaFinalExacto').value) || 0);
+}
+
+function getEsperado() {
+  const vf  = parseFloat(document.getElementById('ventasFinal')?.value) || 0;
+  const vha = state.ventasHastaAhora || 0;
+  const ty  = getTotalYapes();
+  const ci  = state.cajaInicial || 0;
+  return round2(vf - vha - ty + ci);
 }
 
 // ============================================================
@@ -199,69 +220,16 @@ function guardarApertura() {
   state.cajaInicial      = getCajaInicial();
   state.ventasHastaAhora = parseFloat(document.getElementById('ventasHastaAhora').value) || 0;
   state.ultimoYape       = parseFloat(document.getElementById('ultimoYape').value) || 0;
-  state.aperturaGuardada = true;
+  state.cajaAbierta      = true;
   state.aperturaFecha    = new Date().toISOString();
-
-  if (state.inicialMode === 'denom') {
-    state.inicialBreakdown = getDenomBreakdown('inicial');
-  } else {
-    state.inicialBreakdown = null;
-  }
-
-  try {
-    localStorage.setItem('cajaApertura', JSON.stringify({
-      cajaInicial:      state.cajaInicial,
-      ventasHastaAhora: state.ventasHastaAhora,
-      ultimoYape:       state.ultimoYape,
-      aperturaGuardada: true,
-      aperturaFecha:    state.aperturaFecha,
-      inicialMode:      state.inicialMode,
-      inicialBreakdown: state.inicialBreakdown,
-    }));
-  } catch (e) { /* storage not available */ }
-
-  const alert = document.getElementById('alertApertura');
-  alert.classList.remove('hidden');
-  setTimeout(() => alert.classList.add('hidden'), 4500);
+  state.inicialBreakdown = state.inicialMode === 'denom' ? getDenomBreakdown('inicial') : null;
+  saveState();
+  showView('cierre');
 }
 
-function loadApertura() {
-  try {
-    const raw = localStorage.getItem('cajaApertura');
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    Object.assign(state, data);
-
-    // Populate apertura fields
-    if (data.cajaInicial !== undefined)
-      document.getElementById('cajaInicialExacto').value = data.cajaInicial;
-    if (data.ventasHastaAhora !== undefined)
-      document.getElementById('ventasHastaAhora').value = data.ventasHastaAhora;
-    if (data.ultimoYape !== undefined)
-      document.getElementById('ultimoYape').value = data.ultimoYape;
-
-    // Restore mode
-    if (data.inicialMode) setMode('inicial', data.inicialMode);
-  } catch (e) { /* ignore */ }
-}
-
-function renderResumenApertura() {
-  const cardOk   = document.getElementById('cardResumenApertura');
-  const cardWarn = document.getElementById('cardSinApertura');
-
-  if (!state.aperturaGuardada) {
-    cardOk.style.display   = 'none';
-    cardWarn.style.display = 'block';
-    return;
-  }
-
-  cardOk.style.display   = 'block';
-  cardWarn.style.display = 'none';
-
+function renderResumen() {
   const fechaStr = state.aperturaFecha
-    ? new Date(state.aperturaFecha).toLocaleString('es-PE')
-    : 'N/A';
-
+    ? new Date(state.aperturaFecha).toLocaleString('es-PE') : 'N/A';
   document.getElementById('resumenGrid').innerHTML = `
     <div class="info-item">
       <div class="info-label">Caja Inicial</div>
@@ -276,8 +244,8 @@ function renderResumenApertura() {
       <div class="info-val">${fmt(state.ultimoYape)}</div>
     </div>
     <div class="info-item">
-      <div class="info-label">Hora de apertura</div>
-      <div class="info-val" style="font-size:13px">${fechaStr}</div>
+      <div class="info-label">Apertura</div>
+      <div class="info-val" style="font-size:12px;line-height:1.4">${fechaStr}</div>
     </div>`;
 }
 
@@ -285,33 +253,31 @@ function renderResumenApertura() {
 //  YAPES
 // ============================================================
 function onYapesInput() {
-  const raw    = document.getElementById('yapesInput').value;
-  const parts  = raw.split(',').map(s => s.trim()).filter(s => s !== '');
-  const chips  = document.getElementById('yapesChips');
-  let total    = 0;
-  let chipsHtml = '';
+  const raw   = document.getElementById('yapesInput').value;
+  const parts = raw.split(',').map(s => s.trim()).filter(s => s !== '');
+  let total = 0, html = '';
 
   parts.forEach(p => {
     const v = parseFloat(p);
     if (!isNaN(v) && v >= 0) {
       total += v;
-      chipsHtml += `<span class="chip chip-ok">S/. ${v.toFixed(2)}</span>`;
-    } else {
-      chipsHtml += `<span class="chip chip-err">${p} ⚠</span>`;
+      html  += `<span class="chip chip-ok">S/. ${v.toFixed(2)}</span>`;
+    } else if (p) {
+      html  += `<span class="chip chip-err">${p} ⚠</span>`;
     }
   });
 
-  chips.innerHTML = chipsHtml;
   total = round2(total);
+  document.getElementById('yapesChips').innerHTML         = html;
   document.getElementById('totalYapesDisplay').textContent = fmt(total);
-  calcular();
+  calcularEsperado();
 }
 
 function getTotalYapes() {
   const raw = document.getElementById('yapesInput')?.value || '';
   return round2(raw.split(',').reduce((sum, s) => {
     const v = parseFloat(s.trim());
-    return sum + (isNaN(v) ? 0 : v);
+    return sum + (isNaN(v) || v < 0 ? 0 : v);
   }, 0));
 }
 
@@ -321,210 +287,395 @@ function getYapesList() {
 }
 
 // ============================================================
-//  CALCULATION
+//  CALCULATIONS
 // ============================================================
-function calcular() {
+function calcularEsperado() {
   const vf  = parseFloat(document.getElementById('ventasFinal')?.value) || 0;
   const vha = state.ventasHastaAhora || 0;
   const ty  = getTotalYapes();
   const ci  = state.cajaInicial || 0;
-  const res = round2(vf - vha - ty + ci);
+  const esp = round2(vf - vha - ty + ci);
 
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
-  set('fVF', vf);
+  set('fVF',  vf);
   set('fVHA', vha);
-  set('fTY', ty);
-  set('fCI', ci);
+  set('fTY',  ty);
+  set('fCI',  ci);
 
-  const resEl = document.getElementById('fResultado');
-  if (resEl) {
-    resEl.textContent = fmt(res);
-    resEl.style.color = res >= 0 ? '#059669' : '#dc2626';
+  const espEl = document.getElementById('fEsperado');
+  if (espEl) {
+    espEl.textContent = fmt(esp);
+    espEl.style.color = esp >= 0 ? '#4338ca' : '#dc2626';
+  }
+
+  calcularDiferencia();
+}
+
+function calcularDiferencia() {
+  const esp  = getEsperado();
+  const real = getCajaFinal();
+  const diff = round2(real - esp);
+
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
+  set('diffEsperado', esp);
+  set('diffReal',     real);
+
+  const iconEl   = document.getElementById('diffIcon');
+  const textEl   = document.getElementById('diffText');
+  const amountEl = document.getElementById('diffAmount');
+  const card     = document.getElementById('cardDiff');
+  if (!iconEl) return;
+
+  if (real === 0 && esp === 0) {
+    iconEl.textContent   = '—';
+    textEl.textContent   = 'Ingrese los montos para ver el resultado';
+    amountEl.textContent = '';
+    card.className       = 'card card-diff';
+    return;
+  }
+
+  if (diff === 0) {
+    iconEl.textContent   = '✅';
+    textEl.textContent   = 'Caja exacta — todo cuadra';
+    amountEl.textContent = '';
+    card.className       = 'card card-diff diff-ok';
+  } else if (diff > 0) {
+    iconEl.textContent   = '💰';
+    textEl.textContent   = 'Sobra dinero';
+    amountEl.textContent = fmt(diff);
+    card.className       = 'card card-diff diff-over';
+  } else {
+    iconEl.textContent   = '⚠️';
+    textEl.textContent   = 'Falta dinero';
+    amountEl.textContent = fmt(Math.abs(diff));
+    card.className       = 'card card-diff diff-under';
   }
 }
 
 // ============================================================
-//  CLOSE & PDF
+//  CLOSE CASH & GENERATE PDF
 // ============================================================
 function cerrarCaja() {
-  const ventasFinal = parseFloat(document.getElementById('ventasFinal').value) || 0;
-  const totalYapes  = getTotalYapes();
-  const cajaFinal   = getCajaFinal();
-  const resultado   = round2(ventasFinal - (state.ventasHastaAhora || 0) - totalYapes + (state.cajaInicial || 0));
+  const ventasFinal      = parseFloat(document.getElementById('ventasFinal').value) || 0;
+  const totalYapes       = getTotalYapes();
+  const yapesList        = getYapesList();
+  const efectivoReal     = getCajaFinal();
+  const efectivoEsperado = getEsperado();
+  const diferencia       = round2(efectivoReal - efectivoEsperado);
 
-  generarPDF({
-    fecha:            new Date(),
-    cajaInicial:      state.cajaInicial || 0,
+  const report = {
+    id:               Date.now(),
+    fecha:            new Date().toISOString(),
+    cajaInicial:      state.cajaInicial,
+    ventasHastaAhora: state.ventasHastaAhora,
+    ultimoYape:       state.ultimoYape,
+    aperturaFecha:    state.aperturaFecha,
     inicialMode:      state.inicialMode,
     inicialBreakdown: state.inicialBreakdown,
-    ventasHastaAhora: state.ventasHastaAhora || 0,
-    ultimoYape:       state.ultimoYape || 0,
-    aperturaFecha:    state.aperturaFecha,
-    cajaFinal,
-    cierreMode:       state.cierreMode,
-    cierreBreakdown:  state.cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
     ventasFinal,
-    yapesList:        getYapesList(),
     totalYapes,
-    resultado,
+    yapesList,
+    cierreMode,
+    cierreBreakdown:  cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
+    efectivoEsperado,
+    efectivoReal,
+    diferencia,
+  };
+
+  saveReport(report);
+  generarPDF(report);
+  resetAfterClose();
+}
+
+function resetAfterClose() {
+  state = {
+    cajaAbierta: false, cajaInicial: 0, ventasHastaAhora: 0,
+    ultimoYape: 0, aperturaFecha: null, inicialMode: 'monto', inicialBreakdown: null,
+  };
+  saveState();
+
+  // Reset cierre form fields
+  ['ventasFinal', 'yapesInput', 'cajaFinalExacto'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('yapesChips').innerHTML            = '';
+  document.getElementById('totalYapesDisplay').textContent   = 'S/. 0.00';
+  document.getElementById('cierreDenomTotal').textContent    = 'S/. 0.00';
+  DENOMS.forEach((_, i) => {
+    const qEl = document.getElementById(`cierreQty${i}`);
+    const sEl = document.getElementById(`cierreSub${i}`);
+    if (qEl) qEl.value = '';
+    if (sEl) sEl.textContent = 'S/. 0.00';
   });
 
-  // Clear stored apertura after close
-  try { localStorage.removeItem('cajaApertura'); } catch (e) {}
-  state.aperturaGuardada  = false;
-  state.cajaInicial       = 0;
-  state.ventasHastaAhora  = 0;
-  state.ultimoYape        = 0;
-  state.aperturaFecha     = null;
-  state.inicialBreakdown  = null;
+  showView('apertura');
 }
 
 // ============================================================
-//  PDF GENERATION  (jsPDF)
+//  REPORTS  (localStorage)
+// ============================================================
+function getReports() {
+  try { return JSON.parse(localStorage.getItem('cajaReportes') || '[]'); }
+  catch { return []; }
+}
+
+function saveReport(report) {
+  try {
+    const reports = getReports();
+    reports.unshift(report);
+    localStorage.setItem('cajaReportes', JSON.stringify(reports));
+  } catch (e) {}
+}
+
+function renderReportes() {
+  const desde = document.getElementById('filtroDesde')?.value;
+  const hasta = document.getElementById('filtroHasta')?.value;
+
+  let reports = getReports();
+  if (desde) reports = reports.filter(r => new Date(r.fecha) >= new Date(desde));
+  if (hasta) {
+    const h = new Date(hasta); h.setHours(23, 59, 59);
+    reports = reports.filter(r => new Date(r.fecha) <= h);
+  }
+
+  const tbody  = document.getElementById('reportesTbody');
+  const noData = document.getElementById('noReportes');
+
+  if (reports.length === 0) {
+    tbody.innerHTML = '';
+    noData.classList.remove('hidden');
+    return;
+  }
+  noData.classList.add('hidden');
+
+  tbody.innerHTML = reports.map(r => {
+    const diffClass = r.diferencia > 0 ? 'diff-pos' : r.diferencia < 0 ? 'diff-neg' : 'diff-zero';
+    const diffText  = r.diferencia === 0 ? '✓ Exacto'
+      : r.diferencia > 0 ? `+${fmt(r.diferencia)}`
+      : `−${fmt(Math.abs(r.diferencia))}`;
+    return `<tr>
+      <td>${new Date(r.fecha).toLocaleString('es-PE')}</td>
+      <td>${fmt(r.cajaInicial)}</td>
+      <td>${fmt(r.ventasHastaAhora)}</td>
+      <td>${fmt(r.ventasFinal)}</td>
+      <td>${fmt(r.totalYapes)}</td>
+      <td>${fmt(r.efectivoEsperado)}</td>
+      <td>${fmt(r.efectivoReal)}</td>
+      <td class="${diffClass}">${diffText}</td>
+    </tr>`;
+  }).join('');
+}
+
+function limpiarFiltros() {
+  document.getElementById('filtroDesde').value = '';
+  document.getElementById('filtroHasta').value = '';
+  renderReportes();
+}
+
+function exportarExcel() {
+  const desde = document.getElementById('filtroDesde')?.value;
+  const hasta = document.getElementById('filtroHasta')?.value;
+
+  let reports = getReports();
+  if (desde) reports = reports.filter(r => new Date(r.fecha) >= new Date(desde));
+  if (hasta) {
+    const h = new Date(hasta); h.setHours(23, 59, 59);
+    reports = reports.filter(r => new Date(r.fecha) <= h);
+  }
+
+  if (reports.length === 0) { alert('No hay reportes para exportar.'); return; }
+
+  const data = reports.map(r => ({
+    'Fecha Cierre':                 new Date(r.fecha).toLocaleString('es-PE'),
+    'Caja Inicial (S/.)':           r.cajaInicial,
+    'Ventas hasta ahora (S/.)':     r.ventasHastaAhora,
+    'Ultimo Yape (S/.)':            r.ultimoYape,
+    'Ventas Final (S/.)':           r.ventasFinal,
+    'Total Yapes (S/.)':            r.totalYapes,
+    'Efectivo Esperado (S/.)':      r.efectivoEsperado,
+    'Efectivo Real (S/.)':          r.efectivoReal,
+    'Diferencia (S/.)':             r.diferencia,
+    'Resultado':                    r.diferencia === 0 ? 'Exacto' : r.diferencia > 0 ? 'Sobra' : 'Falta',
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws['!cols'] = [
+    {wch:22},{wch:18},{wch:22},{wch:16},{wch:18},{wch:16},{wch:22},{wch:18},{wch:16},{wch:10}
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Reportes de Caja');
+  XLSX.writeFile(wb, `Reportes_Caja_${new Date().toLocaleDateString('es-PE').replace(/\//g,'-')}.xlsx`);
+}
+
+// ============================================================
+//  PDF GENERATION
 // ============================================================
 function generarPDF(d) {
   const { jsPDF } = window.jspdf;
-  const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pw   = doc.internal.pageSize.getWidth();
-  const mg   = 20;
-  const COL2 = pw - mg;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pw  = doc.internal.pageSize.getWidth();
+  const ph  = doc.internal.pageSize.getHeight();
+  const mg  = 18;
 
-  const BLUE  = [30, 58, 95];
-  const LBLUE = [239, 246, 255];
-  const GREEN = [5, 150, 105];
-  const GRAY  = [100, 116, 139];
-  const DARK  = [26, 32, 44];
+  const BLUE   = [30, 58, 95];
+  const LBLUE  = [239, 246, 255];
+  const GREEN  = [5, 150, 105];
+  const RED    = [220, 38, 38];
+  const ORANGE = [194, 65, 12];
+  const GRAY   = [100, 116, 139];
+  const DARK   = [26, 32, 44];
+  const INDIGO = [67, 56, 202];
+
+  function newPageIfNeeded(y, needed) {
+    if (y + needed > ph - 22) { doc.addPage(); return mg; }
+    return y;
+  }
 
   // ---- HEADER ----
   doc.setFillColor(...BLUE);
-  doc.rect(0, 0, pw, 36, 'F');
+  doc.rect(0, 0, pw, 32, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.text('REPORTE DE CIERRE DE CAJA', pw / 2, 16, { align: 'center' });
+  doc.setFontSize(16);
+  doc.text('REPORTE DE CIERRE DE CAJA', pw / 2, 14, { align: 'center' });
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  const fechaOpts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
+  doc.setFontSize(9);
+  const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
   doc.text(
-    `${d.fecha.toLocaleDateString('es-PE', fechaOpts)}  |  ${d.fecha.toLocaleTimeString('es-PE')}`,
-    pw / 2, 27, { align: 'center' }
+    `${new Date(d.fecha).toLocaleDateString('es-PE', opts)}  |  ${new Date(d.fecha).toLocaleTimeString('es-PE')}`,
+    pw / 2, 24, { align: 'center' }
   );
 
-  let y = 46;
+  let y = 40;
 
   // ---- APERTURA ----
-  y = pdfSeccion(doc, 'DATOS DE APERTURA', y, pw, mg, BLUE, LBLUE);
-
-  if (d.aperturaFecha) {
-    y = pdfFila(doc, 'Fecha de apertura',
-      new Date(d.aperturaFecha).toLocaleString('es-PE'), y, mg, pw, DARK, BLUE);
-  }
-  y = pdfFila(doc, 'Caja Inicial',      fmt(d.cajaInicial),       y, mg, pw, DARK, BLUE);
-  y = pdfFila(doc, 'Ventas hasta ahora', fmt(d.ventasHastaAhora), y, mg, pw, DARK, BLUE);
-  y = pdfFila(doc, 'Último Yape',       fmt(d.ultimoYape),        y, mg, pw, DARK, BLUE);
+  y = pdfSec(doc, 'DATOS DE APERTURA', y, pw, mg, BLUE, LBLUE);
+  if (d.aperturaFecha)
+    y = pdfRow(doc, 'Fecha apertura', new Date(d.aperturaFecha).toLocaleString('es-PE'), y, mg, pw, DARK, BLUE);
+  y = pdfRow(doc, 'Caja Inicial',       fmt(d.cajaInicial),       y, mg, pw, DARK, BLUE);
+  y = pdfRow(doc, 'Ventas hasta ahora', fmt(d.ventasHastaAhora),  y, mg, pw, DARK, BLUE);
+  y = pdfRow(doc, 'Último Yape',        fmt(d.ultimoYape),         y, mg, pw, DARK, BLUE);
 
   if (d.inicialMode === 'denom' && d.inicialBreakdown?.length) {
-    y += 3;
+    y = newPageIfNeeded(y, d.inicialBreakdown.length * 4 + 8);
+    y += 2;
     doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY);
-    doc.text('Detalle denominaciones (Caja Inicial):', mg, y); y += 5;
+    doc.text('Detalle caja inicial:', mg, y); y += 4.5;
     d.inicialBreakdown.forEach(item => {
-      doc.text(`   ${item.label}  ×  ${item.qty}  =  S/. ${item.subtotal.toFixed(2)}`, mg + 4, y);
-      y += 4.5;
+      doc.text(`   ${item.label} × ${item.qty} = S/. ${item.subtotal.toFixed(2)}`, mg + 4, y);
+      y += 4;
     });
   }
+  y += 5;
 
-  y += 6;
+  // ---- VENTAS & YAPES ----
+  y = newPageIfNeeded(y, 30);
+  y = pdfSec(doc, 'VENTAS Y YAPES', y, pw, mg, BLUE, LBLUE);
+  y = pdfRow(doc, 'Ventas Final', fmt(d.ventasFinal), y, mg, pw, DARK, BLUE);
 
-  // ---- CIERRE ----
-  y = pdfSeccion(doc, 'DATOS DE CIERRE', y, pw, mg, BLUE, LBLUE);
-  y = pdfFila(doc, 'Ventas Final',               fmt(d.ventasFinal), y, mg, pw, DARK, BLUE);
-  y = pdfFila(doc, 'Efectivo en Caja al Cierre', fmt(d.cajaFinal),   y, mg, pw, DARK, BLUE);
-
-  if (d.cierreMode === 'denom' && d.cierreBreakdown?.length) {
-    y += 3;
-    doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY);
-    doc.text('Detalle denominaciones (Cierre):', mg, y); y += 5;
-    d.cierreBreakdown.forEach(item => {
-      doc.text(`   ${item.label}  ×  ${item.qty}  =  S/. ${item.subtotal.toFixed(2)}`, mg + 4, y);
-      y += 4.5;
-    });
-  }
-
-  if (d.yapesList.length > 0) {
-    y += 3;
+  if (d.yapesList?.length) {
+    y = newPageIfNeeded(y, d.yapesList.length * 4 + 10);
+    y += 2;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
     doc.text('Yapes recibidos:', mg, y); y += 5;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GRAY);
     d.yapesList.forEach((v, i) => {
-      doc.text(`   Yape ${i + 1}: S/. ${v.toFixed(2)}`, mg + 4, y); y += 4.5;
+      doc.text(`   Yape ${i + 1}: S/. ${v.toFixed(2)}`, mg + 4, y); y += 4;
     });
     y += 1;
   }
-  y = pdfFila(doc, 'Total Yapes', fmt(d.totalYapes), y, mg, pw, DARK, BLUE);
-
-  y += 8;
+  y = pdfRow(doc, 'Total Yapes', fmt(d.totalYapes), y, mg, pw, DARK, BLUE);
+  y += 5;
 
   // ---- CÁLCULO ----
-  y = pdfSeccion(doc, 'CÁLCULO', y, pw, mg, BLUE, LBLUE);
-
-  const boxH = 58;
-  doc.setFillColor(240, 253, 244);
-  doc.setDrawColor(187, 247, 208);
-  doc.roundedRect(mg, y, pw - mg * 2, boxH, 3, 3, 'FD');
-
-  let fy = y + 9;
+  y = newPageIfNeeded(y, 58);
+  y = pdfSec(doc, 'CÁLCULO — EFECTIVO ESPERADO', y, pw, mg, BLUE, LBLUE);
+  doc.setFillColor(245, 243, 255); doc.setDrawColor(199, 195, 245);
+  doc.roundedRect(mg, y, pw - mg * 2, 50, 3, 3, 'FD');
+  let fy = y + 8;
   const c1 = mg + 8, c2 = pw - mg - 8;
 
-  const fRow = (lbl, val, color) => {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(...DARK);
+  const fRow = (lbl, val, col) => {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
     doc.text(lbl, c1, fy);
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(...color);
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...col);
     doc.text(fmt(val), c2, fy, { align: 'right' });
-    fy += 7.5;
+    fy += 7;
   };
 
-  fRow('Ventas Final',         d.ventasFinal,        DARK);
-  fRow('− Ventas hasta ahora', d.ventasHastaAhora,   [180, 90, 20]);
-  fRow('− Total Yapes',        d.totalYapes,          [180, 90, 20]);
-  fRow('+ Caja Inicial',       d.cajaInicial,         GREEN);
+  fRow('Ventas Final',          d.ventasFinal,         DARK);
+  fRow('− Ventas hasta ahora',  d.ventasHastaAhora,    ORANGE);
+  fRow('− Total Yapes',         d.totalYapes,           ORANGE);
+  fRow('+ Caja Inicial',        d.cajaInicial,          GREEN);
 
-  doc.setDrawColor(...GRAY);
-  doc.line(c1, fy - 2, c2, fy - 2); fy += 4;
+  doc.setDrawColor(...GRAY); doc.line(c1, fy - 1, c2, fy - 1); fy += 4;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+  doc.setTextColor(...INDIGO); doc.text('= Efectivo esperado', c1, fy);
+  doc.text(fmt(d.efectivoEsperado), c2, fy, { align: 'right' });
+  y = fy + 10;
 
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
-  doc.setTextColor(...DARK); doc.text('= RESULTADO', c1, fy);
-  doc.setTextColor(...(d.resultado >= 0 ? GREEN : [220, 38, 38]));
-  doc.text(fmt(d.resultado), c2, fy, { align: 'right' });
+  // ---- EFECTIVO REAL ----
+  y = newPageIfNeeded(y, 30);
+  y += 2;
+  y = pdfSec(doc, 'EFECTIVO REAL EN CAJA', y, pw, mg, BLUE, LBLUE);
+  y = pdfRow(doc, 'Efectivo real contado', fmt(d.efectivoReal), y, mg, pw, DARK, BLUE);
+
+  if (d.cierreMode === 'denom' && d.cierreBreakdown?.length) {
+    y = newPageIfNeeded(y, d.cierreBreakdown.length * 4 + 8);
+    y += 2;
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY);
+    doc.text('Detalle denominaciones:', mg, y); y += 4.5;
+    d.cierreBreakdown.forEach(item => {
+      doc.text(`   ${item.label} × ${item.qty} = S/. ${item.subtotal.toFixed(2)}`, mg + 4, y);
+      y += 4;
+    });
+  }
+  y += 6;
+
+  // ---- RESULTADO ----
+  y = newPageIfNeeded(y, 28);
+  y = pdfSec(doc, 'RESULTADO FINAL', y, pw, mg, BLUE, LBLUE);
+
+  const diffColor = d.diferencia < 0 ? RED : GREEN;
+  const diffBg    = d.diferencia < 0 ? [254, 226, 226] : [220, 252, 231];
+  const diffText  = d.diferencia === 0
+    ? '✓  Caja exacta — todo cuadra'
+    : d.diferencia > 0
+      ? `Sobra   ${fmt(d.diferencia)}`
+      : `Falta   ${fmt(Math.abs(d.diferencia))}`;
+
+  doc.setFillColor(...diffBg); doc.setDrawColor(...diffColor);
+  doc.roundedRect(mg, y, pw - mg * 2, 16, 3, 3, 'FD');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(...diffColor);
+  doc.text(diffText, pw / 2, y + 10, { align: 'center' });
+  y += 22;
 
   // ---- FOOTER ----
-  const ph = doc.internal.pageSize.getHeight();
-  doc.setDrawColor(...GRAY);
-  doc.line(mg, ph - 16, pw - mg, ph - 16);
+  doc.setDrawColor(...GRAY); doc.line(mg, ph - 14, pw - mg, ph - 14);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
-  doc.text('Reporte generado por Control de Caja', pw / 2, ph - 10, { align: 'center' });
-  doc.text(d.fecha.toLocaleString('es-PE'), pw / 2, ph - 5, { align: 'center' });
+  doc.text('Reporte generado por Control de Caja', pw / 2, ph - 8, { align: 'center' });
+  doc.text(new Date(d.fecha).toLocaleString('es-PE'), pw / 2, ph - 4, { align: 'center' });
 
-  const name = `Cierre_Caja_${d.fecha.toLocaleDateString('es-PE').replace(/\//g, '-')}.pdf`;
-  doc.save(name);
+  doc.save(`Cierre_Caja_${new Date(d.fecha).toLocaleDateString('es-PE').replace(/\//g, '-')}.pdf`);
 }
 
 // PDF helpers
-function pdfSeccion(doc, title, y, pw, mg, BLUE, LBLUE) {
+function pdfSec(doc, title, y, pw, mg, BLUE, LBLUE) {
   doc.setFillColor(...LBLUE); doc.setDrawColor(...BLUE);
-  doc.roundedRect(mg, y, pw - mg * 2, 10, 2, 2, 'FD');
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...BLUE);
-  doc.text(title, mg + 5, y + 7);
-  return y + 16;
+  doc.roundedRect(mg, y, pw - mg * 2, 9, 2, 2, 'FD');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...BLUE);
+  doc.text(title, mg + 4, y + 6.5);
+  return y + 14;
 }
 
-function pdfFila(doc, label, value, y, mg, pw, DARK, BLUE) {
+function pdfRow(doc, label, value, y, mg, pw, DARK, BLUE) {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
   doc.text(label + ':', mg + 2, y);
   doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE);
   doc.text(value, pw - mg - 2, y, { align: 'right' });
-  doc.setDrawColor(230, 230, 230);
-  doc.line(mg, y + 2.5, pw - mg, y + 2.5);
-  return y + 9;
+  doc.setDrawColor(235, 235, 235); doc.line(mg, y + 2.5, pw - mg, y + 2.5);
+  return y + 8;
 }
 
 // ============================================================
