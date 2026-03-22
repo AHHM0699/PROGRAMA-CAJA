@@ -29,6 +29,7 @@
     <div class="header-right">
       <span id="headerDate" class="header-date"></span>
       <button class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
+      <button class="btn btn-ghost" onclick="openSettings()">⚙️ Config</button>
       <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
     </div>
   </header>
@@ -43,7 +44,6 @@
         <p class="section-sub">Complete los datos para abrir la caja del día</p>
       </div>
 
-      <!-- Caja Inicial -->
       <div class="card">
         <div class="card-head">
           <h3>Caja Inicial</h3>
@@ -69,7 +69,6 @@
         </div>
       </div>
 
-      <!-- Ventas hasta ahora -->
       <div class="card">
         <div class="card-head"><h3>Ventas hasta ahora</h3></div>
         <div class="card-body">
@@ -81,7 +80,6 @@
         </div>
       </div>
 
-      <!-- Último Yape -->
       <div class="card">
         <div class="card-head"><h3>Último Yape registrado</h3></div>
         <div class="card-body">
@@ -107,7 +105,6 @@
         <p class="section-sub">Complete el cierre paso a paso</p>
       </div>
 
-      <!-- Resumen apertura -->
       <div class="card card-info">
         <div class="card-head"><h3>Datos de Apertura</h3></div>
         <div class="card-body">
@@ -115,7 +112,7 @@
         </div>
       </div>
 
-      <!-- PASO 1: Ventas Final -->
+      <!-- PASO 1 -->
       <div class="card">
         <div class="card-head"><h3><span class="step-num">1</span> Monto de Ventas Final</h3></div>
         <div class="card-body">
@@ -127,13 +124,13 @@
         </div>
       </div>
 
-      <!-- PASO 2: Yapes -->
+      <!-- PASO 2 -->
       <div class="card">
         <div class="card-head"><h3><span class="step-num">2</span> Yapes Recibidos</h3></div>
         <div class="card-body">
-          <label class="field-label">Ingrese los montos separados por comas</label>
-          <textarea id="yapesInput" class="form-control" rows="3"
-            placeholder="Ej: 15.50, 30.00, 8.75, 100" oninput="onYapesInput()"></textarea>
+          <label class="field-label">Un monto por línea — presiona Enter para agregar otro</label>
+          <textarea id="yapesInput" class="form-control yapes-textarea" rows="4"
+            placeholder="15.50&#10;30.00&#10;8.75" oninput="onYapesInput()"></textarea>
           <div id="yapesChips" class="chips-wrap"></div>
           <div class="inline-total">
             <span>Total Yapes</span>
@@ -142,7 +139,7 @@
         </div>
       </div>
 
-      <!-- PASO 3: Efectivo Esperado (calculado automáticamente) -->
+      <!-- PASO 3: Efectivo Esperado -->
       <div class="card card-expected">
         <div class="card-head"><h3><span class="step-num">3</span> Efectivo Esperado en Caja</h3></div>
         <div class="card-body">
@@ -199,7 +196,7 @@
         </div>
       </div>
 
-      <!-- PASO 5: Resultado / Diferencia -->
+      <!-- PASO 5: Resultado -->
       <div class="card card-diff" id="cardDiff">
         <div class="card-head"><h3><span class="step-num">5</span> Resultado</h3></div>
         <div class="card-body">
@@ -238,6 +235,11 @@
           <p class="section-sub">Todos los cierres de caja registrados</p>
         </div>
         <button class="btn btn-secondary" onclick="showView('auto')">← Volver</button>
+      </div>
+
+      <!-- Sync indicator -->
+      <div id="syncIndicator" class="sync-indicator hidden">
+        <span class="sync-spinner"></span> Sincronizando con Google Sheets...
       </div>
 
       <div class="card">
@@ -279,6 +281,69 @@
 
   </div><!-- /app-content -->
 </div><!-- /mainApp -->
+
+
+<!-- ===== SETTINGS MODAL ===== -->
+<div id="settingsModal" class="modal-overlay hidden" onclick="if(event.target===this) closeSettings()">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>⚙️ Configuración — Google Sheets</h3>
+      <button class="btn-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc">
+        Conecta la app con Google Sheets para sincronizar los reportes entre dispositivos.
+        Los datos también seguirán guardados localmente como respaldo.
+      </p>
+
+      <div class="setup-steps">
+        <div class="setup-step">
+          <span class="setup-step-n">1</span>
+          <div>Abre <strong>Google Sheets</strong>, crea una hoja nueva y ve a
+            <strong>Extensiones → Apps Script</strong>.</div>
+        </div>
+        <div class="setup-step">
+          <span class="setup-step-n">2</span>
+          <div>Borra todo el contenido del editor, pega el código de abajo y guarda
+            (<kbd>Ctrl+S</kbd>).</div>
+        </div>
+      </div>
+
+      <div class="code-block-wrap">
+        <button class="btn btn-sm btn-secondary copy-btn" onclick="copyScript(this)">📋 Copiar código</button>
+        <pre id="scriptCodePre" class="script-pre"></pre>
+      </div>
+
+      <div class="setup-steps" style="margin-top:12px">
+        <div class="setup-step">
+          <span class="setup-step-n">3</span>
+          <div>Clic en <strong>Implementar → Nueva implementación</strong>.
+            Tipo: <strong>Aplicación web</strong>.
+            Acceso: <strong>"Cualquier persona"</strong>.
+            Copia la URL generada.</div>
+        </div>
+        <div class="setup-step">
+          <span class="setup-step-n">4</span>
+          <div>Pega la URL aquí y prueba la conexión:</div>
+        </div>
+      </div>
+
+      <div style="margin-top:10px">
+        <label class="field-label">URL del Apps Script</label>
+        <input type="url" id="sheetsUrlInput" class="form-control"
+          placeholder="https://script.google.com/macros/s/AKfy.../exec">
+      </div>
+
+      <div id="connStatus" class="conn-status hidden"></div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="testConnection()">🔍 Probar conexión</button>
+        <button class="btn btn-primary" onclick="saveSettings()">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>

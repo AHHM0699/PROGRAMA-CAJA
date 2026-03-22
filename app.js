@@ -256,7 +256,7 @@ function renderResumen() {
 // ============================================================
 function onYapesInput() {
   const raw   = document.getElementById('yapesInput').value;
-  const parts = raw.split(',').map(s => s.trim()).filter(s => s !== '');
+  const parts = raw.split('\n').map(s => s.trim()).filter(s => s !== '');
   let total = 0, html = '';
 
   parts.forEach(p => {
@@ -270,14 +270,14 @@ function onYapesInput() {
   });
 
   total = round2(total);
-  document.getElementById('yapesChips').innerHTML         = html;
+  document.getElementById('yapesChips').innerHTML          = html;
   document.getElementById('totalYapesDisplay').textContent = fmt(total);
   calcularEsperado();
 }
 
 function getTotalYapes() {
   const raw = document.getElementById('yapesInput')?.value || '';
-  return round2(raw.split(',').reduce((sum, s) => {
+  return round2(raw.split('\n').reduce((sum, s) => {
     const v = parseFloat(s.trim());
     return sum + (isNaN(v) || v < 0 ? 0 : v);
   }, 0));
@@ -285,7 +285,7 @@ function getTotalYapes() {
 
 function getYapesList() {
   const raw = document.getElementById('yapesInput')?.value || '';
-  return raw.split(',').map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v >= 0);
+  return raw.split('\n').map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v >= 0);
 }
 
 // ============================================================
@@ -415,26 +415,92 @@ function resetAfterClose() {
 }
 
 // ============================================================
-//  REPORTS  (localStorage)
+//  REPORTS  (localStorage + Google Sheets)
 // ============================================================
-function getReports() {
+function getLocalReports() {
   try { return JSON.parse(localStorage.getItem('cajaReportes') || '[]'); }
   catch { return []; }
 }
 
+// Keep backward-compatible alias
+function getReports() { return getLocalReports(); }
+
 function saveReport(report) {
+  // 1. Save locally
   try {
-    const reports = getReports();
+    const reports = getLocalReports();
     reports.unshift(report);
     localStorage.setItem('cajaReportes', JSON.stringify(reports));
   } catch (e) {}
+
+  // 2. Fire-and-forget to Google Sheets (no-cors avoids CORS preflight on POST)
+  const url = localStorage.getItem('sheetsUrl');
+  if (url) {
+    fetch(url, {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify({ action: 'saveReporte', reporte: report }),
+    }).catch(() => {}); // silent fail — data is safe locally
+  }
 }
 
-function renderReportes() {
+// Fetch all reports from Google Sheets
+async function fetchFromSheets() {
+  const url = localStorage.getItem('sheetsUrl');
+  if (!url) return null;
+  try {
+    const res = await fetch(`${url}?action=getAll`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data)) return null;
+    return data.map(r => ({
+      id:               r['ID'],
+      fecha:            r['Fecha Cierre'],
+      aperturaFecha:    r['Apertura Fecha'],
+      cajaInicial:      parseFloat(r['Caja Inicial'])       || 0,
+      ventasHastaAhora: parseFloat(r['Ventas hasta ahora']) || 0,
+      ultimoYape:       parseFloat(r['Ultimo Yape'])        || 0,
+      ventasFinal:      parseFloat(r['Ventas Final'])       || 0,
+      totalYapes:       parseFloat(r['Total Yapes'])        || 0,
+      yapesList:        tryParseJSON(r['Yapes Lista'], []),
+      efectivoEsperado: parseFloat(r['Efectivo Esperado'])  || 0,
+      efectivoReal:     parseFloat(r['Efectivo Real'])      || 0,
+      diferencia:       parseFloat(r['Diferencia'])         || 0,
+    }));
+  } catch (e) {
+    return null;
+  }
+}
+
+// Get reports from Sheets if configured, else from localStorage
+async function getAllReports() {
+  const url = localStorage.getItem('sheetsUrl');
+  if (!url) return getLocalReports();
+
+  const syncEl = document.getElementById('syncIndicator');
+  if (syncEl) syncEl.classList.remove('hidden');
+
+  const sheetsData = await fetchFromSheets();
+
+  if (syncEl) syncEl.classList.add('hidden');
+
+  if (sheetsData !== null) return sheetsData;
+
+  // Sheets unreachable — show warning and use local
+  if (syncEl) {
+    syncEl.textContent = '⚠️ Sin conexión con Sheets — mostrando datos locales';
+    syncEl.classList.remove('hidden');
+    setTimeout(() => syncEl.classList.add('hidden'), 3500);
+  }
+  return getLocalReports();
+}
+
+async function renderReportes() {
+  const allReports = await getAllReports();
+
   const desde = document.getElementById('filtroDesde')?.value;
   const hasta = document.getElementById('filtroHasta')?.value;
-
-  let reports = getReports();
+  let reports = allReports;
   if (desde) reports = reports.filter(r => new Date(r.fecha) >= new Date(desde));
   if (hasta) {
     const h = new Date(hasta); h.setHours(23, 59, 59);
@@ -475,11 +541,12 @@ function limpiarFiltros() {
   renderReportes();
 }
 
-function exportarExcel() {
+async function exportarExcel() {
+  const allReports = await getAllReports();
   const desde = document.getElementById('filtroDesde')?.value;
   const hasta = document.getElementById('filtroHasta')?.value;
 
-  let reports = getReports();
+  let reports = allReports;
   if (desde) reports = reports.filter(r => new Date(r.fecha) >= new Date(desde));
   if (hasta) {
     const h = new Date(hasta); h.setHours(23, 59, 59);
@@ -489,25 +556,152 @@ function exportarExcel() {
   if (reports.length === 0) { alert('No hay reportes para exportar.'); return; }
 
   const data = reports.map(r => ({
-    'Fecha Cierre':                 new Date(r.fecha).toLocaleString('es-PE'),
-    'Caja Inicial (S/.)':           r.cajaInicial,
-    'Ventas hasta ahora (S/.)':     r.ventasHastaAhora,
-    'Ultimo Yape (S/.)':            r.ultimoYape,
-    'Ventas Final (S/.)':           r.ventasFinal,
-    'Total Yapes (S/.)':            r.totalYapes,
-    'Efectivo Esperado (S/.)':      r.efectivoEsperado,
-    'Efectivo Real (S/.)':          r.efectivoReal,
-    'Diferencia (S/.)':             r.diferencia,
-    'Resultado':                    r.diferencia === 0 ? 'Exacto' : r.diferencia > 0 ? 'Sobra' : 'Falta',
+    'Fecha Cierre':             new Date(r.fecha).toLocaleString('es-PE'),
+    'Caja Inicial (S/.)':       r.cajaInicial,
+    'Ventas hasta ahora (S/.)': r.ventasHastaAhora,
+    'Ultimo Yape (S/.)':        r.ultimoYape,
+    'Ventas Final (S/.)':       r.ventasFinal,
+    'Total Yapes (S/.)':        r.totalYapes,
+    'Efectivo Esperado (S/.)':  r.efectivoEsperado,
+    'Efectivo Real (S/.)':      r.efectivoReal,
+    'Diferencia (S/.)':         r.diferencia,
+    'Resultado':                r.diferencia === 0 ? 'Exacto' : r.diferencia > 0 ? 'Sobra' : 'Falta',
   }));
 
   const ws = XLSX.utils.json_to_sheet(data);
-  ws['!cols'] = [
-    {wch:22},{wch:18},{wch:22},{wch:16},{wch:18},{wch:16},{wch:22},{wch:18},{wch:16},{wch:10}
-  ];
+  ws['!cols'] = [{wch:22},{wch:18},{wch:22},{wch:16},{wch:18},{wch:16},{wch:22},{wch:18},{wch:16},{wch:10}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Reportes de Caja');
   XLSX.writeFile(wb, `Reportes_Caja_${new Date().toLocaleDateString('es-PE').replace(/\//g,'-')}.xlsx`);
+}
+
+// ============================================================
+//  GOOGLE SHEETS SETTINGS
+// ============================================================
+const APPS_SCRIPT_CODE = `// ── Pegar completo en Google Apps Script ──────────────────────
+
+function doGet(e) {
+  const a = (e.parameter.action || '').trim();
+  if (a === 'test')   return R({ok: true, msg: 'Conexion exitosa'});
+  if (a === 'getAll') {
+    const sh   = getSheet();
+    const rows = sh.getDataRange().getValues();
+    if (rows.length < 2) return R([]);
+    const h = rows[0];
+    return R(rows.slice(1).reverse().map(r => {
+      const o = {};
+      h.forEach((k, i) => o[k] = r[i]);
+      return o;
+    }));
+  }
+  return R({error: 'accion desconocida'});
+}
+
+function doPost(e) {
+  try {
+    const b = JSON.parse(e.postData.contents);
+    if (b.action === 'saveReporte') {
+      const r = b.reporte;
+      getSheet().appendRow([
+        r.id, r.fecha, r.aperturaFecha,
+        r.cajaInicial, r.ventasHastaAhora, r.ultimoYape,
+        r.ventasFinal, r.totalYapes,
+        JSON.stringify(r.yapesList || []),
+        r.efectivoEsperado, r.efectivoReal, r.diferencia
+      ]);
+      return R({success: true});
+    }
+  } catch (err) { return R({error: err.toString()}); }
+  return R({error: 'accion desconocida'});
+}
+
+function getSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName('Reportes');
+  if (!sh) {
+    sh = ss.insertSheet('Reportes');
+    const cols = [
+      'ID', 'Fecha Cierre', 'Apertura Fecha', 'Caja Inicial',
+      'Ventas hasta ahora', 'Ultimo Yape', 'Ventas Final',
+      'Total Yapes', 'Yapes Lista', 'Efectivo Esperado',
+      'Efectivo Real', 'Diferencia'
+    ];
+    sh.appendRow(cols);
+    sh.getRange(1, 1, 1, cols.length)
+      .setFontWeight('bold')
+      .setBackground('#1e3a5f')
+      .setFontColor('#ffffff');
+  }
+  return sh;
+}
+
+function R(data) {
+  return ContentService
+    .createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+
+function openSettings() {
+  document.getElementById('sheetsUrlInput').value = localStorage.getItem('sheetsUrl') || '';
+  document.getElementById('scriptCodePre').textContent = APPS_SCRIPT_CODE;
+  document.getElementById('connStatus').className = 'conn-status hidden';
+  document.getElementById('settingsModal').classList.remove('hidden');
+}
+
+function closeSettings() {
+  document.getElementById('settingsModal').classList.add('hidden');
+}
+
+function saveSettings() {
+  const url = document.getElementById('sheetsUrlInput').value.trim();
+  if (url) {
+    localStorage.setItem('sheetsUrl', url);
+  } else {
+    localStorage.removeItem('sheetsUrl');
+  }
+  closeSettings();
+}
+
+async function testConnection() {
+  const url = document.getElementById('sheetsUrlInput').value.trim();
+  if (!url) { setConnStatus('error', 'Ingresa una URL primero.'); return; }
+
+  setConnStatus('loading', 'Probando conexión...');
+  try {
+    const res  = await fetch(`${url}?action=test`);
+    const data = await res.json();
+    if (data.ok) {
+      setConnStatus('ok', '✅ ' + (data.msg || 'Conexión exitosa'));
+    } else {
+      setConnStatus('error', '⚠️ El script respondió con error: ' + JSON.stringify(data));
+    }
+  } catch (e) {
+    setConnStatus('error', '❌ No se pudo conectar. Verifica que el script esté desplegado con acceso "Cualquier persona".');
+  }
+}
+
+function setConnStatus(type, msg) {
+  const el = document.getElementById('connStatus');
+  el.className = `conn-status conn-${type}`;
+  el.textContent = msg;
+}
+
+function copyScript(btn) {
+  navigator.clipboard.writeText(APPS_SCRIPT_CODE).then(() => {
+    btn.textContent = '✅ Copiado';
+    setTimeout(() => { btn.textContent = '📋 Copiar código'; }, 2000);
+  }).catch(() => {
+    // Fallback for browsers without clipboard API
+    const el = document.getElementById('scriptCodePre');
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('copy');
+    btn.textContent = '✅ Copiado';
+    setTimeout(() => { btn.textContent = '📋 Copiar código'; }, 2000);
+  });
 }
 
 // ============================================================
@@ -694,6 +888,10 @@ function escHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function tryParseJSON(str, fallback) {
+  try { return JSON.parse(str); } catch { return fallback; }
 }
 
 // SHA-256 via Web Crypto API (built into all modern browsers, no library needed)
