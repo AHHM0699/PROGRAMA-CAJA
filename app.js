@@ -3,7 +3,8 @@
 // ============================================================
 //  CONSTANTS
 // ============================================================
-const PASSWORD = 'REDONDA07.';
+// Password stored as SHA-256 hash — the plain text never appears in this file.
+const PASSWORD_HASH = '2d4e7db060a92769c58c1c355d5207537ac741e43baf27712025bbb371198d5d';
 
 const DENOMS = [
   { label: 'S/. 0.10', val: 0.10, tipo: 'Moneda' },
@@ -51,9 +52,10 @@ window.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 //  AUTH
 // ============================================================
-function login() {
+async function login() {
   const input = document.getElementById('passInput');
-  if (input.value === PASSWORD) {
+  const hash  = await sha256(input.value);
+  if (hash === PASSWORD_HASH) {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('mainApp').style.display    = 'block';
     document.getElementById('loginError').style.display = 'none';
@@ -263,7 +265,7 @@ function onYapesInput() {
       total += v;
       html  += `<span class="chip chip-ok">S/. ${v.toFixed(2)}</span>`;
     } else if (p) {
-      html  += `<span class="chip chip-err">${p} ⚠</span>`;
+      html  += `<span class="chip chip-err">${escHtml(p)} ⚠</span>`;
     }
   });
 
@@ -683,3 +685,19 @@ function pdfRow(doc, label, value, y, mg, pw, DARK, BLUE) {
 // ============================================================
 function round2(n) { return Math.round(n * 100) / 100; }
 function fmt(n)    { return `S/. ${(+n).toFixed(2)}`; }
+
+// Escape HTML special characters to prevent XSS
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// SHA-256 via Web Crypto API (built into all modern browsers, no library needed)
+async function sha256(str) {
+  const buf  = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
