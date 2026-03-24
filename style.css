@@ -61,6 +61,16 @@ body {
 .app-header h1 { font-size: 18px; font-weight: 700; }
 .header-right { display: flex; align-items: center; gap: 10px; }
 .header-date { font-size: 12px; opacity: .75; }
+.empleado-badge {
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(255,255,255,.2);
+  border: 1px solid rgba(255,255,255,.4);
+  padding: 4px 10px;
+  border-radius: 12px;
+  color: #fff;
+  letter-spacing: .02em;
+}
 
 /* ============ CONTENT & VIEWS ============ */
 .app-content { max-width: 820px; margin: 0 auto; padding: 28px 16px; }

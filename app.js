@@ -4,7 +4,8 @@
 //  CONSTANTS
 // ============================================================
 // Password stored as SHA-256 hash — the plain text never appears in this file.
-const PASSWORD_HASH = '2d4e7db060a92769c58c1c355d5207537ac741e43baf27712025bbb371198d5d';
+const PASSWORD_HASH  = '2d4e7db060a92769c58c1c355d5207537ac741e43baf27712025bbb371198d5d';
+const EMPLOYEE_HASH  = 'b3cfbb5c6ea591e6b21fe9720e24257bd25f2c8025a591cda2ac548ac4e3c9a9';
 
 const DENOMS = [
   { label: 'S/. 0.10', val: 0.10, tipo: 'Moneda' },
@@ -38,6 +39,7 @@ let cierreMode = 'denom'; // denomination is default for closing
 
 let currentEventoTipo    = 'Egreso';
 let currentEventoSubtipo = 'Efectivo';
+let userRole             = 'admin'; // 'admin' | 'employee'
 
 // Inactivity timer
 let _inactivityTimer   = null;
@@ -67,10 +69,14 @@ window.addEventListener('DOMContentLoaded', () => {
 async function login() {
   const input = document.getElementById('passInput');
   const hash  = await sha256(input.value);
-  if (hash === PASSWORD_HASH) {
+
+  if (hash === PASSWORD_HASH || hash === EMPLOYEE_HASH) {
+    userRole = (hash === EMPLOYEE_HASH) ? 'employee' : 'admin';
+    input.value = '';
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('mainApp').style.display    = 'block';
     document.getElementById('loginError').style.display = 'none';
+    _applyRoleUI();
     loadState();
     showView('auto');
     startInactivityTimer();
@@ -83,8 +89,16 @@ async function login() {
   }
 }
 
+function _applyRoleUI() {
+  const isEmp = userRole === 'employee';
+  document.getElementById('empleadoBadge').classList.toggle('hidden', !isEmp);
+  document.getElementById('btnHistorial').style.display = isEmp ? 'none' : '';
+  document.getElementById('btnConfig').style.display    = isEmp ? 'none' : '';
+}
+
 function logout() {
   stopInactivityTimer();
+  userRole = 'admin';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('mainApp').style.display     = 'none';
   document.getElementById('passInput').value = '';
@@ -95,9 +109,11 @@ function logout() {
 //  VIEWS  (apertura | cierre | reportes | auto)
 // ============================================================
 function showView(view) {
+  if (userRole === 'employee') { _showEmployeeView(); return; }
+
   if (view === 'auto') view = state.cajaAbierta ? 'cierre' : 'apertura';
 
-  ['viewApertura', 'viewCierre', 'viewReportes'].forEach(id =>
+  ['viewApertura', 'viewCierre', 'viewReportes', 'viewEmpleado'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
 
@@ -106,6 +122,41 @@ function showView(view) {
 
   if (view === 'cierre')   { renderResumen(); renderEventos(); calcularEsperado(); }
   if (view === 'reportes') renderReportes();
+}
+
+function _showEmployeeView() {
+  ['viewApertura', 'viewCierre', 'viewReportes', 'viewEmpleado'].forEach(id =>
+    document.getElementById(id).classList.add('hidden')
+  );
+  document.getElementById('viewEmpleado').classList.remove('hidden');
+
+  const open = state.cajaAbierta;
+  document.getElementById('empCajaCerrada').classList.toggle('hidden', open);
+  document.getElementById('empCajaAbierta').classList.toggle('hidden', !open);
+
+  if (open) {
+    // Render apertura summary
+    const fechaStr = state.aperturaFecha
+      ? escHtml(new Date(state.aperturaFecha).toLocaleString('es-PE')) : 'N/A';
+    document.getElementById('empResumenGrid').innerHTML = `
+      <div class="info-item">
+        <div class="info-label">Caja Inicial</div>
+        <div class="info-val">${fmt(state.cajaInicial)}</div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">Ventas hasta ahora</div>
+        <div class="info-val">${fmt(state.ventasHastaAhora)}</div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">Último Yape</div>
+        <div class="info-val">${fmt(state.ultimoYape)}</div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">Apertura</div>
+        <div class="info-val" style="font-size:12px;line-height:1.4">${fechaStr}</div>
+      </div>`;
+    renderEventos();
+  }
 }
 
 // ============================================================
@@ -143,7 +194,13 @@ function loadState() {
   try {
     const raw = localStorage.getItem('cajaState');
     if (!raw) return;
-    Object.assign(state, JSON.parse(raw));
+    const saved = JSON.parse(raw);
+    // Whitelist approach — never use Object.assign directly on state (prototype pollution risk)
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
+    const fields = ['cajaAbierta','cajaInicial','ventasHastaAhora','ultimoYape',
+                    'aperturaFecha','inicialMode','inicialBreakdown','eventos'];
+    fields.forEach(k => { if (Object.prototype.hasOwnProperty.call(saved, k)) state[k] = saved[k]; });
+    if (!Array.isArray(state.eventos)) state.eventos = [];
     if (state.cajaAbierta) {
       setMode('inicial', state.inicialMode || 'monto');
       document.getElementById('cajaInicialExacto').value = state.cajaInicial      || 0;
@@ -265,7 +322,7 @@ function guardarApertura() {
 
 function renderResumen() {
   const fechaStr = state.aperturaFecha
-    ? new Date(state.aperturaFecha).toLocaleString('es-PE') : 'N/A';
+    ? escHtml(new Date(state.aperturaFecha).toLocaleString('es-PE')) : 'N/A';
   document.getElementById('resumenGrid').innerHTML = `
     <div class="info-item">
       <div class="info-label">Caja Inicial</div>
@@ -503,7 +560,7 @@ function saveReport(report) {
 
   // 2. Fire-and-forget to Google Sheets (no-cors avoids CORS preflight on POST)
   const url = localStorage.getItem('sheetsUrl');
-  if (url) {
+  if (url && isValidSheetsUrl(url)) {
     fetch(url, {
       method: 'POST',
       mode: 'no-cors',
@@ -515,7 +572,7 @@ function saveReport(report) {
 // Fetch all reports from Google Sheets
 async function fetchFromSheets() {
   const url = localStorage.getItem('sheetsUrl');
-  if (!url) return null;
+  if (!url || !isValidSheetsUrl(url)) return null;
   try {
     const res = await fetch(`${url}?action=getAll`);
     if (!res.ok) return null;
@@ -543,7 +600,7 @@ async function fetchFromSheets() {
 // Get reports from Sheets if configured, else from localStorage
 async function getAllReports() {
   const url = localStorage.getItem('sheetsUrl');
-  if (!url) return getLocalReports();
+  if (!url || !isValidSheetsUrl(url)) return getLocalReports();
 
   const syncEl = document.getElementById('syncIndicator');
   if (syncEl) syncEl.classList.remove('hidden');
@@ -669,12 +726,23 @@ function doPost(e) {
   try {
     const b = JSON.parse(e.postData.contents);
     if (b.action === 'saveReporte') {
-      const r = b.reporte;
+      const r   = b.reporte;
+      const evs = r.eventos || [];
+      const egr = evs.reduce((s, ev) =>
+        (ev.tipo === 'Egreso' || ev.tipo === 'Divisa') ? s + ev.monto : s, 0);
+      const ing = evs.reduce((s, ev) =>
+        (ev.tipo === 'Ingreso' && ev.subtipo === 'Efectivo') ? s + ev.monto : s, 0);
+      const usd = evs.reduce((s, ev) =>
+        ev.tipo === 'Divisa' ? s + (ev.usd || 0) : s, 0);
       getSheet().appendRow([
         r.id, r.fecha, r.aperturaFecha,
         r.cajaInicial, r.ventasHastaAhora, r.ultimoYape,
         r.ventasFinal, r.totalYapes,
         JSON.stringify(r.yapesList || []),
+        JSON.stringify(evs),
+        Math.round(egr * 100) / 100,
+        Math.round(ing * 100) / 100,
+        Math.round(usd * 100) / 100,
         r.efectivoEsperado, r.efectivoReal, r.diferencia
       ]);
       return R({success: true});
@@ -691,8 +759,9 @@ function getSheet() {
     const cols = [
       'ID', 'Fecha Cierre', 'Apertura Fecha', 'Caja Inicial',
       'Ventas hasta ahora', 'Ultimo Yape', 'Ventas Final',
-      'Total Yapes', 'Yapes Lista', 'Efectivo Esperado',
-      'Efectivo Real', 'Diferencia'
+      'Total Yapes', 'Yapes Lista', 'Eventos',
+      'Total Egresos', 'Total Ingresos Ef.', 'Total USD',
+      'Efectivo Esperado', 'Efectivo Real', 'Diferencia'
     ];
     sh.appendRow(cols);
     sh.getRange(1, 1, 1, cols.length)
@@ -720,8 +789,19 @@ function closeSettings() {
   document.getElementById('settingsModal').classList.add('hidden');
 }
 
+function isValidSheetsUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && u.hostname === 'script.google.com';
+  } catch { return false; }
+}
+
 function saveSettings() {
   const url = document.getElementById('sheetsUrlInput').value.trim();
+  if (url && !isValidSheetsUrl(url)) {
+    setConnStatus('error', '❌ URL inválida. Debe ser https://script.google.com/...');
+    return;
+  }
   if (url) {
     localStorage.setItem('sheetsUrl', url);
   } else {
@@ -733,6 +813,7 @@ function saveSettings() {
 async function testConnection() {
   const url = document.getElementById('sheetsUrlInput').value.trim();
   if (!url) { setConnStatus('error', 'Ingresa una URL primero.'); return; }
+  if (!isValidSheetsUrl(url)) { setConnStatus('error', '❌ URL inválida. Debe ser https://script.google.com/...'); return; }
 
   setConnStatus('loading', 'Probando conexión...');
   try {
@@ -882,40 +963,43 @@ function eliminarEvento(idx) {
 }
 
 function renderEventos() {
-  const card = document.getElementById('cardEventos');
-  const list = document.getElementById('eventosList');
+  _renderEventosInto('cardEventos',    'eventosList');
+  _renderEventosInto('cardEventosEmp', 'eventosListEmp');
+}
+
+function _renderEventosInto(cardId, listId) {
+  const card = document.getElementById(cardId);
+  const list = document.getElementById(listId);
   if (!card || !list) return;
 
-  const eventos = state.eventos || [];
-  if (eventos.length === 0) {
-    card.style.display = 'none';
-    const usdB = document.getElementById('usdEnCaja');
-    if (usdB) usdB.style.display = 'none';
-    return;
+  const eventos   = state.eventos || [];
+  const totalEgr  = getEventosEgresos();
+  const totalIng  = getEventosIngresos();
+  const totalUSD  = getTotalUSD();
+
+  // USD banner only exists in cierre view
+  if (cardId === 'cardEventos') {
+    const usdBanner = document.getElementById('usdEnCaja');
+    const usdVal    = document.getElementById('usdEnCajaVal');
+    if (usdBanner && usdVal) {
+      usdBanner.style.display = totalUSD > 0 && eventos.length > 0 ? '' : 'none';
+      usdVal.textContent = `$${totalUSD.toFixed(2)}`;
+    }
   }
+
+  if (eventos.length === 0) { card.style.display = 'none'; return; }
   card.style.display = '';
-
-  const totalEgr = getEventosEgresos();
-  const totalIng = getEventosIngresos();
-  const totalUSD = getTotalUSD();
-
-  // Show/hide USD banner in result card
-  const usdBanner = document.getElementById('usdEnCaja');
-  const usdVal    = document.getElementById('usdEnCajaVal');
-  if (usdBanner && usdVal) {
-    usdBanner.style.display = totalUSD > 0 ? '' : 'none';
-    usdVal.textContent = `$${totalUSD.toFixed(2)}`;
-  }
 
   list.innerHTML = eventos.map((e, i) => {
     let badgeClass, badgeLabel, montoClass;
-    if (e.tipo === 'Egreso')  { badgeClass = 'ev-egreso';     badgeLabel = 'Egreso';  montoClass = 'ev-monto-egr'; }
-    else if (e.tipo === 'Divisa')  { badgeClass = 'ev-divisa';     badgeLabel = 'Divisa';  montoClass = 'ev-monto-egr'; }
-    else if (e.subtipo === 'Yape') { badgeClass = 'ev-ingreso-yp'; badgeLabel = 'Ing. Yape'; montoClass = 'ev-monto-ing'; }
-    else                           { badgeClass = 'ev-ingreso-ef'; badgeLabel = 'Ing. Ef.';  montoClass = 'ev-monto-ing'; }
+    if      (e.tipo === 'Egreso')              { badgeClass = 'ev-egreso';     badgeLabel = 'Egreso';    montoClass = 'ev-monto-egr'; }
+    else if (e.tipo === 'Divisa')              { badgeClass = 'ev-divisa';     badgeLabel = 'Divisa';    montoClass = 'ev-monto-egr'; }
+    else if (e.subtipo === 'Yape')             { badgeClass = 'ev-ingreso-yp'; badgeLabel = 'Ing. Yape'; montoClass = 'ev-monto-ing'; }
+    else                                       { badgeClass = 'ev-ingreso-ef'; badgeLabel = 'Ing. Ef.';  montoClass = 'ev-monto-ing'; }
 
-    const sign = (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? '−' : '+';
-    const divisaNote = e.tipo === 'Divisa' ? `<span style="font-size:11px;color:#64748b"> ($${e.usd?.toFixed(2)} × ${e.tc})</span>` : '';
+    const sign       = (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? '−' : '+';
+    const divisaNote = e.tipo === 'Divisa'
+      ? `<span style="font-size:11px;color:#64748b"> ($${(+e.usd).toFixed(2)} × ${e.tc})</span>` : '';
 
     return `<div class="evento-item">
       <span class="evento-badge ${badgeClass}">${badgeLabel}</span>
@@ -930,7 +1014,7 @@ function renderEventos() {
   list.innerHTML += `<div class="eventos-footer">
     <span class="eventos-footer-item">Egresos: <span class="ev-foot-val ev-monto-egr">${fmt(totalEgr)}</span></span>
     <span class="eventos-footer-item">Ingresos ef.: <span class="ev-foot-val ev-monto-ing">${fmt(totalIng)}</span></span>
-    ${totalUSD > 0 ? `<span class="eventos-footer-item">💵 USD en caja: <span class="ev-foot-val" style="color:#1e40af">$${totalUSD.toFixed(2)}</span></span>` : ''}
+    ${totalUSD > 0 ? `<span class="eventos-footer-item">💵 USD: <span class="ev-foot-val" style="color:#1e40af">$${totalUSD.toFixed(2)}</span></span>` : ''}
   </div>`;
 }
 

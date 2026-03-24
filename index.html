@@ -28,8 +28,9 @@
     <h1>💰 Control de Caja</h1>
     <div class="header-right">
       <span id="headerDate" class="header-date"></span>
-      <button class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
-      <button class="btn btn-ghost" onclick="openSettings()">⚙️ Config</button>
+      <span id="empleadoBadge" class="empleado-badge hidden">👤 Modo empleado</span>
+      <button id="btnHistorial" class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
+      <button id="btnConfig"    class="btn btn-ghost" onclick="openSettings()">⚙️ Config</button>
       <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
     </div>
   </header>
@@ -299,6 +300,45 @@
         <p id="noReportes" class="no-data hidden">No hay reportes registrados aún.</p>
       </div>
     </div><!-- /viewReportes -->
+
+
+    <!-- ========== VISTA: EMPLEADO ========== -->
+    <div id="viewEmpleado" class="view hidden">
+
+      <!-- Caja cerrada -->
+      <div id="empCajaCerrada" class="hidden">
+        <div class="section-header">
+          <div class="status-badge status-closed">● Caja cerrada</div>
+          <h2>Vista Empleado</h2>
+          <p class="section-sub">La caja aún no ha sido abierta hoy. Espera a que el administrador la abra.</p>
+        </div>
+      </div>
+
+      <!-- Caja abierta -->
+      <div id="empCajaAbierta" class="hidden">
+        <div class="section-header">
+          <div class="status-badge status-open">● Caja abierta</div>
+          <h2>Vista Empleado</h2>
+        </div>
+
+        <div class="card card-info">
+          <div class="card-head"><h3>Datos de Apertura</h3></div>
+          <div class="card-body">
+            <div class="info-grid" id="empResumenGrid"></div>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:14px;font-weight:600;color:#374151">Eventos de caja</span>
+          <button class="btn btn-secondary btn-sm" onclick="openEventosModal()">➕ Agregar evento</button>
+        </div>
+        <div id="cardEventosEmp" class="card" style="display:none;margin-bottom:18px">
+          <div class="card-head"><h3>📋 Eventos registrados</h3></div>
+          <div class="card-body" id="eventosListEmp"></div>
+        </div>
+      </div>
+
+    </div><!-- /viewEmpleado -->
 
   </div><!-- /app-content -->
 </div><!-- /mainApp -->
