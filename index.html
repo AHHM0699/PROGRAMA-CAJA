@@ -236,6 +236,9 @@
               <span class="diff-amount" id="diffAmount"></span>
             </div>
           </div>
+          <div id="usdEnCaja" style="display:none;margin-top:10px;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:14px;font-weight:600;color:#1e40af">
+            💵 USD en caja: <span id="usdEnCajaVal">$0.00</span>
+          </div>
         </div>
       </div>
 
@@ -429,6 +432,12 @@
   </div>
 </div>
 
+
+<!-- Inactivity warning toast -->
+<div id="inactivityWarning" class="inactivity-warning hidden">
+  <span>⏱ Sesión inactiva — cerrando en <strong><span id="inactivityCountdown">60</span>s</strong></span>
+  <button class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4)" onclick="resetInactivityTimer()">Seguir</button>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>

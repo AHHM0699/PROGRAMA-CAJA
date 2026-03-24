@@ -39,6 +39,13 @@ let cierreMode = 'denom'; // denomination is default for closing
 let currentEventoTipo    = 'Egreso';
 let currentEventoSubtipo = 'Efectivo';
 
+// Inactivity timer
+let _inactivityTimer   = null;
+let _warningTimer      = null;
+let _countdownInterval = null;
+const INACTIVITY_MS    = 15 * 60 * 1000; // 15 minutes
+const WARNING_AHEAD_MS =      60 * 1000; // show warning 1 min before
+
 // ============================================================
 //  INIT
 // ============================================================
@@ -66,6 +73,7 @@ async function login() {
     document.getElementById('loginError').style.display = 'none';
     loadState();
     showView('auto');
+    startInactivityTimer();
   } else {
     document.getElementById('loginError').style.display = 'block';
     input.value = '';
@@ -76,9 +84,11 @@ async function login() {
 }
 
 function logout() {
+  stopInactivityTimer();
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('mainApp').style.display     = 'none';
   document.getElementById('passInput').value = '';
+  document.getElementById('inactivityWarning').classList.add('hidden');
 }
 
 // ============================================================
@@ -210,6 +220,11 @@ function getCajaFinal() {
   return cierreMode === 'denom'
     ? getDenomTotal('cierre')
     : (parseFloat(document.getElementById('cajaFinalExacto').value) || 0);
+}
+
+function getTotalUSD() {
+  return round2((state.eventos || []).reduce((sum, e) =>
+    e.tipo === 'Divisa' ? sum + (e.usd || 0) : sum, 0));
 }
 
 function getEventosEgresos() {
@@ -872,11 +887,25 @@ function renderEventos() {
   if (!card || !list) return;
 
   const eventos = state.eventos || [];
-  if (eventos.length === 0) { card.style.display = 'none'; return; }
+  if (eventos.length === 0) {
+    card.style.display = 'none';
+    const usdB = document.getElementById('usdEnCaja');
+    if (usdB) usdB.style.display = 'none';
+    return;
+  }
   card.style.display = '';
 
   const totalEgr = getEventosEgresos();
   const totalIng = getEventosIngresos();
+  const totalUSD = getTotalUSD();
+
+  // Show/hide USD banner in result card
+  const usdBanner = document.getElementById('usdEnCaja');
+  const usdVal    = document.getElementById('usdEnCajaVal');
+  if (usdBanner && usdVal) {
+    usdBanner.style.display = totalUSD > 0 ? '' : 'none';
+    usdVal.textContent = `$${totalUSD.toFixed(2)}`;
+  }
 
   list.innerHTML = eventos.map((e, i) => {
     let badgeClass, badgeLabel, montoClass;
@@ -900,7 +929,8 @@ function renderEventos() {
 
   list.innerHTML += `<div class="eventos-footer">
     <span class="eventos-footer-item">Egresos: <span class="ev-foot-val ev-monto-egr">${fmt(totalEgr)}</span></span>
-    <span class="eventos-footer-item">Ingresos efectivo: <span class="ev-foot-val ev-monto-ing">${fmt(totalIng)}</span></span>
+    <span class="eventos-footer-item">Ingresos ef.: <span class="ev-foot-val ev-monto-ing">${fmt(totalIng)}</span></span>
+    ${totalUSD > 0 ? `<span class="eventos-footer-item">💵 USD en caja: <span class="ev-foot-val" style="color:#1e40af">$${totalUSD.toFixed(2)}</span></span>` : ''}
   </div>`;
 }
 
@@ -1075,6 +1105,18 @@ function generarPDF(d) {
   doc.text(diffText, pw / 2, y + 10, { align: 'center' });
   y += 22;
 
+  // USD en caja
+  const totalUSDPDF = (d.eventos || []).reduce((s, e) =>
+    e.tipo === 'Divisa' ? s + (e.usd || 0) : s, 0);
+  if (totalUSDPDF > 0) {
+    y = newPageIfNeeded(y, 14);
+    doc.setFillColor(239, 246, 255); doc.setDrawColor(191, 219, 254);
+    doc.roundedRect(mg, y, pw - mg * 2, 11, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(30, 64, 175);
+    doc.text(`💵 USD en caja: $${round2(totalUSDPDF).toFixed(2)}`, pw / 2, y + 7.5, { align: 'center' });
+    y += 16;
+  }
+
   // ---- FOOTER ----
   doc.setDrawColor(...GRAY); doc.line(mg, ph - 14, pw - mg, ph - 14);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
@@ -1100,6 +1142,46 @@ function pdfRow(doc, label, value, y, mg, pw, DARK, BLUE) {
   doc.text(value, pw - mg - 2, y, { align: 'right' });
   doc.setDrawColor(235, 235, 235); doc.line(mg, y + 2.5, pw - mg, y + 2.5);
   return y + 8;
+}
+
+// ============================================================
+//  INACTIVITY TIMER
+// ============================================================
+function startInactivityTimer() {
+  ['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(ev =>
+    document.addEventListener(ev, resetInactivityTimer, { passive: true })
+  );
+  resetInactivityTimer();
+}
+
+function stopInactivityTimer() {
+  clearTimeout(_inactivityTimer);
+  clearTimeout(_warningTimer);
+  clearInterval(_countdownInterval);
+}
+
+function resetInactivityTimer() {
+  clearTimeout(_inactivityTimer);
+  clearTimeout(_warningTimer);
+  clearInterval(_countdownInterval);
+  document.getElementById('inactivityWarning')?.classList.add('hidden');
+
+  _warningTimer    = setTimeout(_showInactivityWarning, INACTIVITY_MS - WARNING_AHEAD_MS);
+  _inactivityTimer = setTimeout(() => { clearInterval(_countdownInterval); logout(); }, INACTIVITY_MS);
+}
+
+function _showInactivityWarning() {
+  const warn = document.getElementById('inactivityWarning');
+  if (!warn) return;
+  warn.classList.remove('hidden');
+  let secs = Math.round(WARNING_AHEAD_MS / 1000);
+  document.getElementById('inactivityCountdown').textContent = secs;
+  _countdownInterval = setInterval(() => {
+    secs--;
+    const el = document.getElementById('inactivityCountdown');
+    if (el) el.textContent = secs;
+    if (secs <= 0) clearInterval(_countdownInterval);
+  }, 1000);
 }
 
 // ============================================================
