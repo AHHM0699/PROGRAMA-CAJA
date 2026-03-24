@@ -139,6 +139,16 @@
         </div>
       </div>
 
+      <!-- EVENTOS -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:14px;font-weight:600;color:#374151">Eventos de caja</span>
+        <button class="btn btn-secondary btn-sm" onclick="openEventosModal()">➕ Agregar evento</button>
+      </div>
+      <div id="cardEventos" class="card" style="display:none;margin-bottom:18px">
+        <div class="card-head"><h3>📋 Eventos registrados</h3></div>
+        <div class="card-body" id="eventosList"></div>
+      </div>
+
       <!-- PASO 3: Efectivo Esperado -->
       <div class="card card-expected">
         <div class="card-head"><h3><span class="step-num">3</span> Efectivo Esperado en Caja</h3></div>
@@ -155,6 +165,14 @@
             <div class="f-row f-minus">
               <span class="f-label">− Total Yapes</span>
               <span class="f-val" id="fTY">S/. 0.00</span>
+            </div>
+            <div class="f-row f-minus" id="fRowEgr" style="display:none">
+              <span class="f-label">− Egresos / Div.</span>
+              <span class="f-val" id="fEGR">S/. 0.00</span>
+            </div>
+            <div class="f-row f-plus" id="fRowIng" style="display:none">
+              <span class="f-label">+ Ingresos (efectivo)</span>
+              <span class="f-val" id="fING">S/. 0.00</span>
             </div>
             <div class="f-row f-plus">
               <span class="f-label">+ Caja Inicial</span>
@@ -339,6 +357,73 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="testConnection()">🔍 Probar conexión</button>
         <button class="btn btn-primary" onclick="saveSettings()">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ===== EVENTOS MODAL ===== -->
+<div id="eventosModal" class="modal-overlay hidden" onclick="if(event.target===this) closeEventosModal()">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-head">
+      <h3>➕ Agregar Evento</h3>
+      <button class="btn-close" onclick="closeEventosModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="toggle-group" style="margin-bottom:18px;width:100%">
+        <button class="tgl active" id="tglEvEgreso"  onclick="setEventoTipo('Egreso')">Egreso</button>
+        <button class="tgl"        id="tglEvDivisa"  onclick="setEventoTipo('Divisa')">Cambio divisa</button>
+        <button class="tgl"        id="tglEvIngreso" onclick="setEventoTipo('Ingreso')">Ingreso</button>
+      </div>
+
+      <!-- Egreso / Ingreso fields -->
+      <div id="evFieldsBasic">
+        <div id="evSubtipoWrap" style="display:none;margin-bottom:14px">
+          <label class="field-label">Tipo de ingreso</label>
+          <div class="toggle-group">
+            <button class="tgl active" id="tglSubEfectivo" onclick="setEventoSubtipo('Efectivo')">Efectivo</button>
+            <button class="tgl"        id="tglSubYape"     onclick="setEventoSubtipo('Yape')">Yape</button>
+          </div>
+        </div>
+        <label class="field-label">Descripción</label>
+        <input type="text" id="evDesc" class="form-control" placeholder="Ej: Pago proveedor" style="margin-bottom:14px">
+        <label class="field-label">Monto (S/.)</label>
+        <div class="input-wrap">
+          <span class="prefix">S/.</span>
+          <input type="number" id="evMonto" class="form-control" placeholder="0.00" min="0" step="0.01">
+        </div>
+      </div>
+
+      <!-- Divisa fields -->
+      <div id="evFieldsDivisa" class="hidden">
+        <label class="field-label">Descripción (opcional)</label>
+        <input type="text" id="evDivisaDesc" class="form-control" placeholder="Ej: Cambio cliente" style="margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <label class="field-label">Monto USD</label>
+            <div class="input-wrap">
+              <span class="prefix">$</span>
+              <input type="number" id="evUSD" class="form-control" placeholder="0.00" min="0" step="0.01" oninput="calcDivisa()">
+            </div>
+          </div>
+          <div>
+            <label class="field-label">Tipo de cambio</label>
+            <div class="input-wrap">
+              <span class="prefix">S/.</span>
+              <input type="number" id="evTC" class="form-control" placeholder="3.75" min="0" step="0.001" oninput="calcDivisa()">
+            </div>
+          </div>
+        </div>
+        <div class="inline-total">
+          <span>Soles que salen de caja</span>
+          <span class="inline-amount" id="evDivisaSoles">S/. 0.00</span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeEventosModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="addEvento()">Agregar</button>
       </div>
     </div>
   </div>

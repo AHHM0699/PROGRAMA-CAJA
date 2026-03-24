@@ -31,9 +31,13 @@ let state = {
   aperturaFecha:    null,
   inicialMode:      'monto',
   inicialBreakdown: null,
+  eventos:          [],
 };
 
 let cierreMode = 'denom'; // denomination is default for closing
+
+let currentEventoTipo    = 'Egreso';
+let currentEventoSubtipo = 'Efectivo';
 
 // ============================================================
 //  INIT
@@ -41,6 +45,7 @@ let cierreMode = 'denom'; // denomination is default for closing
 window.addEventListener('DOMContentLoaded', () => {
   buildDenomTable('inicial', 'inicialDenomTable');
   buildDenomTable('cierre',  'cierreDenomTable');
+  prefillInicialDenoms();
 
   const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
   document.getElementById('headerDate').textContent =
@@ -89,7 +94,7 @@ function showView(view) {
   const cap = view.charAt(0).toUpperCase() + view.slice(1);
   document.getElementById('view' + cap).classList.remove('hidden');
 
-  if (view === 'cierre')   { renderResumen(); calcularEsperado(); }
+  if (view === 'cierre')   { renderResumen(); renderEventos(); calcularEsperado(); }
   if (view === 'reportes') renderReportes();
 }
 
@@ -207,12 +212,26 @@ function getCajaFinal() {
     : (parseFloat(document.getElementById('cajaFinalExacto').value) || 0);
 }
 
+function getEventosEgresos() {
+  return round2((state.eventos || []).reduce((sum, e) => {
+    return (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? sum + e.monto : sum;
+  }, 0));
+}
+
+function getEventosIngresos() {
+  return round2((state.eventos || []).reduce((sum, e) => {
+    return (e.tipo === 'Ingreso' && e.subtipo === 'Efectivo') ? sum + e.monto : sum;
+  }, 0));
+}
+
 function getEsperado() {
   const vf  = parseFloat(document.getElementById('ventasFinal')?.value) || 0;
   const vha = state.ventasHastaAhora || 0;
   const ty  = getTotalYapes();
   const ci  = state.cajaInicial || 0;
-  return round2(vf - vha - ty + ci);
+  const egr = getEventosEgresos();
+  const ing = getEventosIngresos();
+  return round2(vf - vha - ty + ci - egr + ing);
 }
 
 // ============================================================
@@ -296,13 +315,20 @@ function calcularEsperado() {
   const vha = state.ventasHastaAhora || 0;
   const ty  = getTotalYapes();
   const ci  = state.cajaInicial || 0;
-  const esp = round2(vf - vha - ty + ci);
+  const egr = getEventosEgresos();
+  const ing = getEventosIngresos();
+  const esp = round2(vf - vha - ty + ci - egr + ing);
 
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
   set('fVF',  vf);
   set('fVHA', vha);
   set('fTY',  ty);
   set('fCI',  ci);
+
+  const egrRow = document.getElementById('fRowEgr');
+  const ingRow = document.getElementById('fRowIng');
+  if (egrRow) { egrRow.style.display = egr > 0 ? '' : 'none'; set('fEGR', egr); }
+  if (ingRow) { ingRow.style.display = ing > 0 ? '' : 'none'; set('fING', ing); }
 
   const espEl = document.getElementById('fEsperado');
   if (espEl) {
@@ -365,6 +391,14 @@ function cerrarCaja() {
   const efectivoEsperado = getEsperado();
   const diferencia       = round2(efectivoReal - efectivoEsperado);
 
+  // Save cierre denomination counts for next apertura prefill
+  if (cierreMode === 'denom') {
+    const lastDenoms = DENOMS.map((_, i) =>
+      parseFloat(document.getElementById(`cierreQty${i}`)?.value) || 0
+    );
+    try { localStorage.setItem('lastCierreDenoms', JSON.stringify(lastDenoms)); } catch (e) {}
+  }
+
   const report = {
     id:               Date.now(),
     fecha:            new Date().toISOString(),
@@ -377,6 +411,7 @@ function cerrarCaja() {
     ventasFinal,
     totalYapes,
     yapesList,
+    eventos:          state.eventos || [],
     cierreMode,
     cierreBreakdown:  cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
     efectivoEsperado,
@@ -393,6 +428,7 @@ function resetAfterClose() {
   state = {
     cajaAbierta: false, cajaInicial: 0, ventasHastaAhora: 0,
     ultimoYape: 0, aperturaFecha: null, inicialMode: 'monto', inicialBreakdown: null,
+    eventos: [],
   };
   saveState();
 
@@ -410,6 +446,23 @@ function resetAfterClose() {
     if (qEl) qEl.value = '';
     if (sEl) sEl.textContent = 'S/. 0.00';
   });
+
+  // Reset eventos UI
+  const cardEv = document.getElementById('cardEventos');
+  if (cardEv) cardEv.style.display = 'none';
+
+  // Reset apertura form and prefill denoms from last cierre
+  document.getElementById('cajaInicialExacto').value = '';
+  document.getElementById('ventasHastaAhora').value  = '';
+  document.getElementById('ultimoYape').value        = '';
+  document.getElementById('inicialDenomTotal').textContent = 'S/. 0.00';
+  DENOMS.forEach((_, i) => {
+    const qEl = document.getElementById(`inicialQty${i}`);
+    const sEl = document.getElementById(`inicialSub${i}`);
+    if (qEl) qEl.value = '';
+    if (sEl) sEl.textContent = 'S/. 0.00';
+  });
+  prefillInicialDenoms();
 
   showView('apertura');
 }
@@ -705,6 +758,153 @@ function copyScript(btn) {
 }
 
 // ============================================================
+//  DENOMINATION MEMORY
+// ============================================================
+function prefillInicialDenoms() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lastCierreDenoms') || 'null');
+    if (!Array.isArray(saved)) return;
+    saved.forEach((qty, i) => {
+      if (!qty) return;
+      const input = document.getElementById(`inicialQty${i}`);
+      if (input) { input.value = qty; onDenomInput('inicial', i); }
+    });
+  } catch (e) {}
+}
+
+// ============================================================
+//  EVENTOS
+// ============================================================
+function openEventosModal() {
+  currentEventoTipo    = 'Egreso';
+  currentEventoSubtipo = 'Efectivo';
+  // Reset fields
+  ['evDesc','evDivisaDesc'].forEach(id => { document.getElementById(id).value = ''; });
+  ['evMonto','evUSD','evTC'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('evDivisaSoles').textContent = 'S/. 0.00';
+  // Set type buttons
+  ['tglEvEgreso','tglEvDivisa','tglEvIngreso'].forEach(id =>
+    document.getElementById(id).classList.remove('active')
+  );
+  document.getElementById('tglEvEgreso').classList.add('active');
+  document.getElementById('evFieldsBasic').style.display = '';
+  document.getElementById('evFieldsDivisa').classList.add('hidden');
+  document.getElementById('evSubtipoWrap').style.display = 'none';
+  // Reset subtipo buttons
+  document.getElementById('tglSubEfectivo').classList.add('active');
+  document.getElementById('tglSubYape').classList.remove('active');
+  document.getElementById('eventosModal').classList.remove('hidden');
+}
+
+function closeEventosModal() {
+  document.getElementById('eventosModal').classList.add('hidden');
+}
+
+function setEventoTipo(tipo) {
+  currentEventoTipo = tipo;
+  ['tglEvEgreso','tglEvDivisa','tglEvIngreso'].forEach(id =>
+    document.getElementById(id).classList.remove('active')
+  );
+  const map = { Egreso: 'tglEvEgreso', Divisa: 'tglEvDivisa', Ingreso: 'tglEvIngreso' };
+  document.getElementById(map[tipo]).classList.add('active');
+  document.getElementById('evFieldsBasic').style.display  = tipo === 'Divisa' ? 'none' : '';
+  document.getElementById('evFieldsDivisa').classList.toggle('hidden', tipo !== 'Divisa');
+  document.getElementById('evSubtipoWrap').style.display  = tipo === 'Ingreso' ? '' : 'none';
+}
+
+function setEventoSubtipo(subtipo) {
+  currentEventoSubtipo = subtipo;
+  document.getElementById('tglSubEfectivo').classList.toggle('active', subtipo === 'Efectivo');
+  document.getElementById('tglSubYape').classList.toggle('active',     subtipo === 'Yape');
+}
+
+function calcDivisa() {
+  const usd   = parseFloat(document.getElementById('evUSD').value) || 0;
+  const tc    = parseFloat(document.getElementById('evTC').value)  || 0;
+  const soles = round2(usd * tc);
+  document.getElementById('evDivisaSoles').textContent = fmt(soles);
+}
+
+function addEvento() {
+  let monto = 0, desc = '', usd = 0, tc = 0;
+
+  if (currentEventoTipo === 'Divisa') {
+    usd   = parseFloat(document.getElementById('evUSD').value) || 0;
+    tc    = parseFloat(document.getElementById('evTC').value)  || 0;
+    monto = round2(usd * tc);
+    desc  = document.getElementById('evDivisaDesc').value.trim()
+            || `$${usd.toFixed(2)} × ${tc}`;
+    if (!usd || !tc) { alert('Ingresa el monto en USD y el tipo de cambio.'); return; }
+  } else {
+    monto = parseFloat(document.getElementById('evMonto').value) || 0;
+    desc  = document.getElementById('evDesc').value.trim();
+    if (!monto) { alert('Ingresa un monto válido.'); return; }
+  }
+
+  const evento = {
+    id:      Date.now(),
+    tipo:    currentEventoTipo,
+    subtipo: currentEventoTipo === 'Ingreso' ? currentEventoSubtipo : null,
+    desc,
+    monto,
+    usd:     currentEventoTipo === 'Divisa' ? usd : null,
+    tc:      currentEventoTipo === 'Divisa' ? tc  : null,
+  };
+
+  if (!state.eventos) state.eventos = [];
+  state.eventos.push(evento);
+  saveState();
+  renderEventos();
+  calcularEsperado();
+  closeEventosModal();
+}
+
+function eliminarEvento(idx) {
+  state.eventos.splice(idx, 1);
+  saveState();
+  renderEventos();
+  calcularEsperado();
+}
+
+function renderEventos() {
+  const card = document.getElementById('cardEventos');
+  const list = document.getElementById('eventosList');
+  if (!card || !list) return;
+
+  const eventos = state.eventos || [];
+  if (eventos.length === 0) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  const totalEgr = getEventosEgresos();
+  const totalIng = getEventosIngresos();
+
+  list.innerHTML = eventos.map((e, i) => {
+    let badgeClass, badgeLabel, montoClass;
+    if (e.tipo === 'Egreso')  { badgeClass = 'ev-egreso';     badgeLabel = 'Egreso';  montoClass = 'ev-monto-egr'; }
+    else if (e.tipo === 'Divisa')  { badgeClass = 'ev-divisa';     badgeLabel = 'Divisa';  montoClass = 'ev-monto-egr'; }
+    else if (e.subtipo === 'Yape') { badgeClass = 'ev-ingreso-yp'; badgeLabel = 'Ing. Yape'; montoClass = 'ev-monto-ing'; }
+    else                           { badgeClass = 'ev-ingreso-ef'; badgeLabel = 'Ing. Ef.';  montoClass = 'ev-monto-ing'; }
+
+    const sign = (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? '−' : '+';
+    const divisaNote = e.tipo === 'Divisa' ? `<span style="font-size:11px;color:#64748b"> ($${e.usd?.toFixed(2)} × ${e.tc})</span>` : '';
+
+    return `<div class="evento-item">
+      <span class="evento-badge ${badgeClass}">${badgeLabel}</span>
+      <div class="evento-info">
+        <div class="evento-desc">${escHtml(e.desc || '—')}${divisaNote}</div>
+        <div class="evento-monto ${montoClass}">${sign} ${fmt(e.monto)}</div>
+      </div>
+      <button class="btn-ev-del" onclick="eliminarEvento(${i})" title="Eliminar">✕</button>
+    </div>`;
+  }).join('');
+
+  list.innerHTML += `<div class="eventos-footer">
+    <span class="eventos-footer-item">Egresos: <span class="ev-foot-val ev-monto-egr">${fmt(totalEgr)}</span></span>
+    <span class="eventos-footer-item">Ingresos efectivo: <span class="ev-foot-val ev-monto-ing">${fmt(totalIng)}</span></span>
+  </div>`;
+}
+
+// ============================================================
 //  PDF GENERATION
 // ============================================================
 function generarPDF(d) {
@@ -784,11 +984,33 @@ function generarPDF(d) {
   y = pdfRow(doc, 'Total Yapes', fmt(d.totalYapes), y, mg, pw, DARK, BLUE);
   y += 5;
 
+  // ---- EVENTOS ----
+  if (d.eventos?.length) {
+    y = newPageIfNeeded(y, d.eventos.length * 6 + 20);
+    y = pdfSec(doc, 'EVENTOS DE CAJA', y, pw, mg, BLUE, LBLUE);
+    d.eventos.forEach(ev => {
+      const sign  = (ev.tipo === 'Egreso' || ev.tipo === 'Divisa') ? '−' : '+';
+      const label = `[${ev.tipo}${ev.subtipo ? '/' + ev.subtipo : ''}] ${ev.desc || ''}`;
+      const val   = `${sign} ${fmt(ev.monto)}`;
+      const col   = (ev.tipo === 'Egreso' || ev.tipo === 'Divisa') ? RED : GREEN;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
+      doc.text(label, mg + 2, y);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(...col);
+      doc.text(val, pw - mg - 2, y, { align: 'right' });
+      doc.setDrawColor(235, 235, 235); doc.line(mg, y + 2.5, pw - mg, y + 2.5);
+      y += 8;
+    });
+    y += 2;
+  }
+
   // ---- CÁLCULO ----
-  y = newPageIfNeeded(y, 58);
+  const evExtraRows = ((d.eventos || []).some(e => e.tipo === 'Egreso' || e.tipo === 'Divisa') ? 1 : 0)
+                    + ((d.eventos || []).some(e => e.tipo === 'Ingreso' && e.subtipo === 'Efectivo') ? 1 : 0);
+  const calcBoxH = 50 + evExtraRows * 7;
+  y = newPageIfNeeded(y, calcBoxH + 14);
   y = pdfSec(doc, 'CÁLCULO — EFECTIVO ESPERADO', y, pw, mg, BLUE, LBLUE);
   doc.setFillColor(245, 243, 255); doc.setDrawColor(199, 195, 245);
-  doc.roundedRect(mg, y, pw - mg * 2, 50, 3, 3, 'FD');
+  doc.roundedRect(mg, y, pw - mg * 2, calcBoxH, 3, 3, 'FD');
   let fy = y + 8;
   const c1 = mg + 8, c2 = pw - mg - 8;
 
@@ -803,6 +1025,12 @@ function generarPDF(d) {
   fRow('Ventas Final',          d.ventasFinal,         DARK);
   fRow('− Ventas hasta ahora',  d.ventasHastaAhora,    ORANGE);
   fRow('− Total Yapes',         d.totalYapes,           ORANGE);
+  const egr = (d.eventos || []).reduce((s, e) =>
+    (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? s + e.monto : s, 0);
+  const ing = (d.eventos || []).reduce((s, e) =>
+    (e.tipo === 'Ingreso' && e.subtipo === 'Efectivo') ? s + e.monto : s, 0);
+  if (egr > 0) fRow('− Egresos / Divisa', round2(egr), ORANGE);
+  if (ing > 0) fRow('+ Ingresos (efectivo)', round2(ing), GREEN);
   fRow('+ Caja Inicial',        d.cajaInicial,          GREEN);
 
   doc.setDrawColor(...GRAY); doc.line(c1, fy - 1, c2, fy - 1); fy += 4;

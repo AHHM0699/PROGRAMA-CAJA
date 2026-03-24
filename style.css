@@ -599,6 +599,63 @@ kbd {
   border-top: 1px solid #e2e8f0;
 }
 
+/* ============ EVENTOS ============ */
+.evento-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.evento-item:last-child { border-bottom: none; }
+
+.evento-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.ev-egreso  { background: #fee2e2; color: #991b1b; }
+.ev-divisa  { background: #eff6ff; color: #1e40af; }
+.ev-ingreso-ef { background: #dcfce7; color: #166534; }
+.ev-ingreso-yp { background: #f0fdf4; color: #166534; }
+
+.evento-info { flex: 1; }
+.evento-desc { font-size: 13px; color: #374151; }
+.evento-monto { font-size: 15px; font-weight: 700; margin-top: 1px; }
+.ev-monto-egr { color: #dc2626; }
+.ev-monto-ing { color: #059669; }
+
+.btn-ev-del {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 15px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.btn-ev-del:hover { color: #dc2626; background: #fef2f2; }
+
+.eventos-footer {
+  display: flex;
+  gap: 14px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 2px solid #e2e8f0;
+  flex-wrap: wrap;
+}
+.eventos-footer-item { font-size: 13px; font-weight: 600; color: #374151; }
+.ev-foot-val { font-size: 15px; font-weight: 700; }
+
 /* ============ HELPERS ============ */
 .hidden { display: none !important; }
 
