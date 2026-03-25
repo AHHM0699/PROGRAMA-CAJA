@@ -236,15 +236,17 @@ function saveState() {
   _estadoPushTimer = setTimeout(_doPushEstado, 1500); // batch rapid changes
 }
 
-// Fire-and-forget POST to save live state in the "Estado" sheet
+// Save live state via GET — POST with no-cors loses body on Apps Script's 302 redirect;
+// GET requests reach Apps Script reliably and already have CORS headers.
 function _doPushEstado() {
   const url = localStorage.getItem('sheetsUrl');
   if (!url || !isValidSheetsUrl(url)) return;
-  fetch(url, {
-    method: 'POST',
-    mode: 'no-cors',
-    body: JSON.stringify({ action: 'saveEstado', ts: state._ts, estado: JSON.stringify(state) }),
-  }).catch(() => {});
+  const params = new URLSearchParams({
+    action: 'saveEstado',
+    ts:     String(state._ts),
+    estado: JSON.stringify(state),
+  });
+  fetch(`${url}?${params.toString()}`).catch(() => {});
 }
 
 // Pull live state from Sheets on login; returns true if remote was newer
@@ -850,19 +852,23 @@ function doGet(e) {
     return R({ok: true, ts: Number(row[0]), estado: row[1]});
   }
 
+  // saveEstado via GET — POST loses body on Apps Script's 302 redirect
+  if (a === 'saveEstado') {
+    const ts  = parseInt(e.parameter.ts || '0');
+    const est = e.parameter.estado || '';
+    if (!est) return R({ok: false, error: 'sin datos'});
+    const sh = getEstadoSheet();
+    if (sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1);
+    sh.appendRow([ts, est]);
+    return R({ok: true});
+  }
+
   return R({error: 'accion desconocida'});
 }
 
 function doPost(e) {
   try {
     const b = JSON.parse(e.postData.contents);
-
-    if (b.action === 'saveEstado') {
-      const sh = getEstadoSheet();
-      if (sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1);
-      sh.appendRow([b.ts, b.estado]);
-      return R({ok: true});
-    }
 
     if (b.action === 'saveReporte') {
       const r   = b.reporte;
