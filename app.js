@@ -188,6 +188,29 @@ function toggle(id, show) {
 }
 
 // ============================================================
+//  LAZY SCRIPT LOADER
+// ============================================================
+const _loadedScripts = new Set();
+function loadScript(url, integrity) {
+  if (_loadedScripts.has(url)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.integrity = integrity;
+    s.crossOrigin = 'anonymous';
+    s.referrerPolicy = 'no-referrer';
+    s.onload  = () => { _loadedScripts.add(url); resolve(); };
+    s.onerror = () => reject(new Error('No se pudo cargar: ' + url));
+    document.head.appendChild(s);
+  });
+}
+
+const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+const JSPDF_SRI = 'sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==';
+const XLSX_URL  = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.mini.min.js';
+const XLSX_SRI  = 'sha512-NDQhXrK2pOCL18FV5/Nc+ya9Vz+7o8dJV1IGRwuuYuRMFhAR0allmjWdZCSHFLDYgMvXKyN2jXlSy2JJEmq+ZA==';
+
+// ============================================================
 //  STATE PERSISTENCE  (local + Google Sheets live sync)
 // ============================================================
 
@@ -552,7 +575,7 @@ function calcularDiferencia() {
 // ============================================================
 //  CLOSE CASH & GENERATE PDF
 // ============================================================
-function cerrarCaja() {
+async function cerrarCaja() {
   const ventasFinal      = parseFloat(document.getElementById('ventasFinal').value) || 0;
   const totalYapes       = getTotalYapes();
   const yapesList        = getYapesList();
@@ -589,7 +612,7 @@ function cerrarCaja() {
   };
 
   saveReport(report);
-  generarPDF(report);
+  await generarPDF(report);
   resetAfterClose();
 }
 
@@ -776,6 +799,8 @@ async function exportarExcel() {
   }
 
   if (reports.length === 0) { alert('No hay reportes para exportar.'); return; }
+
+  await loadScript(XLSX_URL, XLSX_SRI);
 
   const data = reports.map(r => ({
     'Fecha Cierre':             new Date(r.fecha).toLocaleString('es-PE'),
@@ -1147,7 +1172,8 @@ function _renderEventosInto(cardId, listId) {
 // ============================================================
 //  PDF GENERATION
 // ============================================================
-function generarPDF(d) {
+async function generarPDF(d) {
+  await loadScript(JSPDF_URL, JSPDF_SRI);
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pw  = doc.internal.pageSize.getWidth();
