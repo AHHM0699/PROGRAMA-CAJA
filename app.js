@@ -33,6 +33,7 @@ let state = {
   inicialMode:      'monto',
   inicialBreakdown: null,
   eventos:          [],
+  _ts:              0,   // unix ms — used for multi-device conflict resolution
 };
 
 let cierreMode = 'denom'; // denomination is default for closing
@@ -78,8 +79,10 @@ async function login() {
     document.getElementById('loginError').style.display = 'none';
     _applyRoleUI();
     loadState();
+    await pullEstadoFromSheets();   // sync live state from Sheets if available
     showView('auto');
     startInactivityTimer();
+    startSyncPolling();             // background poll every 30 s
   } else {
     document.getElementById('loginError').style.display = 'block';
     input.value = '';
@@ -98,6 +101,7 @@ function _applyRoleUI() {
 
 function logout() {
   stopInactivityTimer();
+  stopSyncPolling();
   userRole = 'admin';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('mainApp').style.display     = 'none';
@@ -184,10 +188,106 @@ function toggle(id, show) {
 }
 
 // ============================================================
-//  STATE PERSISTENCE
+//  STATE PERSISTENCE  (local + Google Sheets live sync)
 // ============================================================
-function saveState() {
+
+// Allowed fields — whitelist protects against prototype pollution
+const STATE_FIELDS = [
+  'cajaAbierta','cajaInicial','ventasHastaAhora','ultimoYape',
+  'aperturaFecha','inicialMode','inicialBreakdown','eventos','_ts',
+];
+
+// Write to localStorage only (no Sheets push)
+function saveStateLocal() {
   try { localStorage.setItem('cajaState', JSON.stringify(state)); } catch (e) {}
+}
+
+// Debounced Sheets push timer
+let _estadoPushTimer = null;
+
+// Full save: localStorage + debounced push to Sheets
+function saveState() {
+  state._ts = Date.now();
+  saveStateLocal();
+  clearTimeout(_estadoPushTimer);
+  _estadoPushTimer = setTimeout(_doPushEstado, 1500); // batch rapid changes
+}
+
+// Fire-and-forget POST to save live state in the "Estado" sheet
+function _doPushEstado() {
+  const url = localStorage.getItem('sheetsUrl');
+  if (!url || !isValidSheetsUrl(url)) return;
+  fetch(url, {
+    method: 'POST',
+    mode: 'no-cors',
+    body: JSON.stringify({ action: 'saveEstado', ts: state._ts, estado: JSON.stringify(state) }),
+  }).catch(() => {});
+}
+
+// Pull live state from Sheets on login; returns true if remote was newer
+async function pullEstadoFromSheets() {
+  const url = localStorage.getItem('sheetsUrl');
+  if (!url || !isValidSheetsUrl(url)) return false;
+  try {
+    const res  = await fetch(`${url}?action=getEstado`);
+    const data = await res.json();
+    if (data.ok && data.estado) {
+      const remote = tryParseJSON(data.estado, null);
+      if (remote && typeof remote === 'object' && !Array.isArray(remote)
+          && (remote._ts || 0) > (state._ts || 0)) {
+        _applyRemoteState(remote);
+        return true;
+      }
+    }
+  } catch (e) {}
+  return false;
+}
+
+// Apply a remote state object (whitelist, restore form inputs)
+function _applyRemoteState(remote) {
+  STATE_FIELDS.forEach(k => {
+    if (Object.prototype.hasOwnProperty.call(remote, k)) state[k] = remote[k];
+  });
+  if (!Array.isArray(state.eventos)) state.eventos = [];
+  saveStateLocal();
+  if (state.cajaAbierta) {
+    setMode('inicial', state.inicialMode || 'monto');
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('cajaInicialExacto', state.cajaInicial      || 0);
+    set('ventasHastaAhora',  state.ventasHastaAhora || 0);
+    set('ultimoYape',        state.ultimoYape        || 0);
+  }
+}
+
+// Background polling — detects changes made on another device
+let _syncPollInterval = null;
+function startSyncPolling() {
+  stopSyncPolling();
+  _syncPollInterval = setInterval(async () => {
+    const synced = await pullEstadoFromSheets();
+    if (synced) {
+      showSyncToast('🔄 Sincronizado desde otro dispositivo');
+      // Refresh the currently visible view
+      const views = { viewCierre: () => { renderResumen(); renderEventos(); calcularEsperado(); },
+                      viewEmpleado: () => _showEmployeeView() };
+      for (const [id, fn] of Object.entries(views)) {
+        if (!document.getElementById(id).classList.contains('hidden')) { fn(); break; }
+      }
+    }
+  }, 30000); // every 30 seconds
+}
+
+function stopSyncPolling() {
+  clearInterval(_syncPollInterval);
+  _syncPollInterval = null;
+}
+
+function showSyncToast(msg) {
+  const el = document.getElementById('syncToast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 3500);
 }
 
 function loadState() {
@@ -195,11 +295,8 @@ function loadState() {
     const raw = localStorage.getItem('cajaState');
     if (!raw) return;
     const saved = JSON.parse(raw);
-    // Whitelist approach — never use Object.assign directly on state (prototype pollution risk)
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
-    const fields = ['cajaAbierta','cajaInicial','ventasHastaAhora','ultimoYape',
-                    'aperturaFecha','inicialMode','inicialBreakdown','eventos'];
-    fields.forEach(k => { if (Object.prototype.hasOwnProperty.call(saved, k)) state[k] = saved[k]; });
+    STATE_FIELDS.forEach(k => { if (Object.prototype.hasOwnProperty.call(saved, k)) state[k] = saved[k]; });
     if (!Array.isArray(state.eventos)) state.eventos = [];
     if (state.cajaAbierta) {
       setMode('inicial', state.inicialMode || 'monto');
@@ -707,7 +804,8 @@ const APPS_SCRIPT_CODE = `// ── Pegar completo en Google Apps Script ──�
 
 function doGet(e) {
   const a = (e.parameter.action || '').trim();
-  if (a === 'test')   return R({ok: true, msg: 'Conexion exitosa'});
+  if (a === 'test') return R({ok: true, msg: 'Conexion exitosa'});
+
   if (a === 'getAll') {
     const sh   = getSheet();
     const rows = sh.getDataRange().getValues();
@@ -719,12 +817,28 @@ function doGet(e) {
       return o;
     }));
   }
+
+  if (a === 'getEstado') {
+    const sh = getEstadoSheet();
+    if (sh.getLastRow() < 2) return R({ok: true, ts: 0, estado: null});
+    const row = sh.getRange(2, 1, 1, 2).getValues()[0];
+    return R({ok: true, ts: Number(row[0]), estado: row[1]});
+  }
+
   return R({error: 'accion desconocida'});
 }
 
 function doPost(e) {
   try {
     const b = JSON.parse(e.postData.contents);
+
+    if (b.action === 'saveEstado') {
+      const sh = getEstadoSheet();
+      if (sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1);
+      sh.appendRow([b.ts, b.estado]);
+      return R({ok: true});
+    }
+
     if (b.action === 'saveReporte') {
       const r   = b.reporte;
       const evs = r.eventos || [];
@@ -751,6 +865,7 @@ function doPost(e) {
   return R({error: 'accion desconocida'});
 }
 
+// ── Hoja de reportes cerrados ───────────────────────────────
 function getSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sh = ss.getSheetByName('Reportes');
@@ -765,9 +880,20 @@ function getSheet() {
     ];
     sh.appendRow(cols);
     sh.getRange(1, 1, 1, cols.length)
-      .setFontWeight('bold')
-      .setBackground('#1e3a5f')
-      .setFontColor('#ffffff');
+      .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
+  }
+  return sh;
+}
+
+// ── Hoja de estado en vivo (sincronización multi-dispositivo) ─
+function getEstadoSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName('Estado');
+  if (!sh) {
+    sh = ss.insertSheet('Estado');
+    sh.appendRow(['ts', 'estado']);
+    sh.getRange(1, 1, 1, 2)
+      .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
   }
   return sh;
 }
