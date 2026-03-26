@@ -33,6 +33,7 @@ let state = {
   inicialMode:      'monto',
   inicialBreakdown: null,
   eventos:          [],
+  empleadoYapes:    [],  // yapes entered by employee — synced, separate from admin textarea
   _ts:              0,   // unix ms — used for multi-device conflict resolution
 };
 
@@ -124,7 +125,7 @@ function showView(view) {
   const cap = view.charAt(0).toUpperCase() + view.slice(1);
   document.getElementById('view' + cap).classList.remove('hidden');
 
-  if (view === 'cierre')   { renderResumen(); renderEventos(); calcularEsperado(); }
+  if (view === 'cierre')   { renderResumen(); renderEventos(); _renderEmpYapesAdminRow(); calcularEsperado(); }
   if (view === 'reportes') renderReportes();
 }
 
@@ -160,7 +161,58 @@ function _showEmployeeView() {
         <div class="info-val" style="font-size:12px;line-height:1.4">${fechaStr}</div>
       </div>`;
     renderEventos();
+    _renderEmpYapes();
   }
+}
+
+// ============================================================
+//  EMPLOYEE YAPES
+// ============================================================
+function addYapeEmpleado() {
+  const input = document.getElementById('empYapeInput');
+  const v = round2(parseFloat(input.value));
+  if (isNaN(v) || v <= 0) { input.focus(); return; }
+  if (!Array.isArray(state.empleadoYapes)) state.empleadoYapes = [];
+  state.empleadoYapes.push(v);
+  input.value = '';
+  input.focus();
+  saveState();
+  _renderEmpYapes();
+  _renderEmpYapesAdminRow(); // update admin view if on same device
+  calcularEsperado();
+}
+
+// Shows count + total in the employee view card
+function _renderEmpYapes() {
+  const yapes  = state.empleadoYapes || [];
+  const countEl = document.getElementById('empYapeCount');
+  const resEl   = document.getElementById('empYapesResumen');
+  if (!countEl || !resEl) return;
+
+  if (yapes.length === 0) {
+    countEl.textContent = '';
+    resEl.innerHTML = '';
+    return;
+  }
+  const total = _getEmpYapesTotal();
+  countEl.textContent = `${yapes.length} ingresado${yapes.length > 1 ? 's' : ''}`;
+  resEl.innerHTML = `
+    <div class="inline-total" style="margin-top:0">
+      <span>${yapes.length} Yape${yapes.length > 1 ? 's' : ''} registrado${yapes.length > 1 ? 's' : ''}</span>
+      <span class="inline-amount">${fmt(total)}</span>
+    </div>`;
+}
+
+// Shows employee yapes summary in the admin cierre view
+function _renderEmpYapesAdminRow() {
+  const row = document.getElementById('empYapesAdminRow');
+  const val = document.getElementById('empYapesAdminVal');
+  if (!row || !val) return;
+  const yapes = state.empleadoYapes || [];
+  if (yapes.length === 0) { row.classList.add('hidden'); return; }
+  const total = _getEmpYapesTotal();
+  val.textContent = `${fmt(total)} (${yapes.length})`;
+  row.classList.remove('hidden');
 }
 
 // ============================================================
@@ -217,7 +269,7 @@ const XLSX_SRI  = 'sha512-NDQhXrK2pOCL18FV5/Nc+ya9Vz+7o8dJV1IGRwuuYuRMFhAR0allmj
 // Allowed fields — whitelist protects against prototype pollution
 const STATE_FIELDS = [
   'cajaAbierta','cajaInicial','ventasHastaAhora','ultimoYape',
-  'aperturaFecha','inicialMode','inicialBreakdown','eventos','_ts',
+  'aperturaFecha','inicialMode','inicialBreakdown','eventos','empleadoYapes','_ts',
 ];
 
 // Write to localStorage only (no Sheets push)
@@ -293,7 +345,7 @@ function startSyncPolling() {
     if (synced) {
       showSyncToast('🔄 Sincronizado desde otro dispositivo');
       // Refresh the currently visible view
-      const views = { viewCierre: () => { renderResumen(); renderEventos(); calcularEsperado(); },
+      const views = { viewCierre: () => { renderResumen(); renderEventos(); _renderEmpYapesAdminRow(); calcularEsperado(); },
                       viewEmpleado: () => _showEmployeeView() };
       for (const [id, fn] of Object.entries(views)) {
         if (!document.getElementById(id).classList.contains('hidden')) { fn(); break; }
@@ -485,20 +537,28 @@ function onYapesInput() {
   total = round2(total);
   document.getElementById('yapesChips').innerHTML          = html;
   document.getElementById('totalYapesDisplay').textContent = fmt(total);
+  _renderEmpYapesAdminRow();
   calcularEsperado();
 }
 
 function getTotalYapes() {
   const raw = document.getElementById('yapesInput')?.value || '';
-  return round2(raw.split('\n').reduce((sum, s) => {
+  const adminTotal = round2(raw.split('\n').reduce((sum, s) => {
     const v = parseFloat(s.trim());
     return sum + (isNaN(v) || v < 0 ? 0 : v);
   }, 0));
+  const empTotal = round2((state.empleadoYapes || []).reduce((s, v) => s + v, 0));
+  return round2(adminTotal + empTotal);
 }
 
 function getYapesList() {
   const raw = document.getElementById('yapesInput')?.value || '';
-  return raw.split('\n').map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v >= 0);
+  const adminList = raw.split('\n').map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v >= 0);
+  return [...adminList, ...(state.empleadoYapes || [])];
+}
+
+function _getEmpYapesTotal() {
+  return round2((state.empleadoYapes || []).reduce((s, v) => s + v, 0));
 }
 
 // ============================================================
@@ -622,7 +682,7 @@ function resetAfterClose() {
   state = {
     cajaAbierta: false, cajaInicial: 0, ventasHastaAhora: 0,
     ultimoYape: 0, aperturaFecha: null, inicialMode: 'monto', inicialBreakdown: null,
-    eventos: [],
+    eventos: [], empleadoYapes: [],
   };
   saveState();
 
