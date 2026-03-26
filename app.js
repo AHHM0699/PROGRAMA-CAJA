@@ -223,31 +223,66 @@ async function openYapeWidget() {
   const placeholder = document.getElementById('empYapePipPlaceholder');
 
   _pipWindow = await window.documentPictureInPicture.requestWindow({
-    width: 340, height: 190,
+    width: 230, height: 68,
     disallowReturnToOpener: false,
   });
 
-  // Copy stylesheet link so card looks identical
-  const link = document.createElement('link');
-  link.rel  = 'stylesheet';
-  link.href = document.querySelector('link[rel="stylesheet"]').href;
-  _pipWindow.document.head.appendChild(link);
-
-  // Compact overrides for the floating window
+  // Minimal self-contained styles — no external stylesheet needed at this size
   const style = document.createElement('style');
   style.textContent = `
-    body { margin:0; padding:10px; background:#f0f4f8; font-family:'Segoe UI',system-ui,sans-serif; }
-    .card { margin-bottom:0 !important; box-shadow:none; border:1px solid #e2e8f0; }
-    #btnPip { display:none; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #1e3a5f; display: flex; align-items: center;
+           justify-content: center; height: 100vh; font-family: 'Segoe UI', system-ui, sans-serif; }
+    .card, .card-head, .field-label, #empYapeFeedback, #btnPip { display: none !important; }
+    .card-body { display: flex !important; gap: 5px; align-items: center; padding: 0 !important; }
+    .input-wrap { position: relative; display: flex; align-items: center; }
+    .prefix { position: absolute; left: 7px; font-size: 11px; font-weight: 700;
+               color: #64748b; pointer-events: none; z-index: 1; }
+    #empYapeInput { width: 100px; padding: 6px 6px 6px 26px; border: none; border-radius: 6px;
+                    font-size: 14px; font-family: inherit; outline: none; }
+    #empYapeInput:focus { box-shadow: 0 0 0 2px #60a5fa; }
+    .btn-yape { padding: 6px 10px; background: #2563eb; color: #fff; border: none;
+                border-radius: 6px; font-size: 13px; font-weight: 700; cursor: pointer;
+                font-family: inherit; }
+    .btn-yape:hover { background: #1d4ed8; }
+    #pip-ok { font-size: 11px; font-weight: 700; color: #86efac;
+              margin-left: 4px; white-space: nowrap; min-width: 24px; }
   `;
   _pipWindow.document.head.appendChild(style);
 
-  _pipWindow.document.body.appendChild(card);
+  // Build the micro-widget directly — don't move the card element
+  _pipWindow.document.body.innerHTML = `
+    <div class="input-wrap">
+      <span class="prefix">S/.</span>
+      <input id="pipInput" type="number" placeholder="0.00" min="0" step="0.01" autofocus>
+    </div>
+    <button class="btn-yape" id="pipBtn">+</button>
+    <span id="pip-ok"></span>
+  `;
+
+  const pipInput = _pipWindow.document.getElementById('pipInput');
+  const pipBtn   = _pipWindow.document.getElementById('pipBtn');
+  const pipOk    = _pipWindow.document.getElementById('pip-ok');
+
+  function pipAdd() {
+    const v = round2(parseFloat(pipInput.value));
+    if (isNaN(v) || v <= 0) { pipInput.focus(); return; }
+    state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') + v.toFixed(2);
+    const adminEl = document.getElementById('yapesInput');
+    if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
+    saveState();
+    pipInput.value = '';
+    pipInput.focus();
+    pipOk.textContent = '✓';
+    setTimeout(() => { pipOk.textContent = ''; }, 1200);
+  }
+
+  pipBtn.addEventListener('click', pipAdd);
+  pipInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pipAdd(); } });
+
   if (placeholder) placeholder.classList.remove('hidden');
 
-  // Restore card to main page when PiP is closed
   _pipWindow.addEventListener('pagehide', () => {
-    if (wrap) wrap.insertBefore(card, placeholder);
     if (placeholder) placeholder.classList.add('hidden');
     _pipWindow = null;
   });
