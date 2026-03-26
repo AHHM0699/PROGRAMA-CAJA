@@ -609,6 +609,19 @@ kbd {
   border-top: 1px solid #e2e8f0;
 }
 
+/* ============ PIP PLACEHOLDER ============ */
+.pip-placeholder {
+  padding: 16px;
+  border: 2px dashed #bfdbfe;
+  border-radius: 12px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #3b82f6;
+  background: #eff6ff;
+  margin-bottom: 18px;
+}
+
 /* ============ EVENTOS ============ */
 .evento-item {
   display: flex;

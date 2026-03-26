@@ -103,6 +103,8 @@ function _applyRoleUI() {
 function logout() {
   stopInactivityTimer();
   stopSyncPolling();
+  if (_pipWindow && !_pipWindow.closed) _pipWindow.close();
+  _pipWindow = null;
   userRole = 'admin';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('mainApp').style.display     = 'none';
@@ -173,14 +175,20 @@ function _syncYapesToDom() {
   }
 }
 
+// Resolves an element from main doc or the active PiP window
+function _el(id) {
+  return document.getElementById(id) ||
+    (_pipWindow && !_pipWindow.closed && _pipWindow.document.getElementById(id));
+}
+
 // Employee appends a single amount — never sees existing values
 function addEmpYape() {
-  const input    = document.getElementById('empYapeInput');
-  const feedback = document.getElementById('empYapeFeedback');
+  const input    = _el('empYapeInput');
+  const feedback = _el('empYapeFeedback');
+  if (!input) return;
   const v = round2(parseFloat(input.value));
   if (isNaN(v) || v <= 0) { input.focus(); return; }
 
-  // Append as new line to the shared yapesRaw
   state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') + v.toFixed(2);
 
   // Keep admin textarea in sync if on same device
@@ -195,6 +203,54 @@ function addEmpYape() {
     feedback.textContent = `✓ S/. ${v.toFixed(2)} registrado`;
     setTimeout(() => { if (feedback) feedback.textContent = ''; }, 2500);
   }
+}
+
+// ============================================================
+//  PICTURE-IN-PICTURE YAPE WIDGET
+// ============================================================
+let _pipWindow = null;
+
+async function openYapeWidget() {
+  if (!('documentPictureInPicture' in window)) {
+    alert('Tu versión de Brave/Chrome no soporta esta función (requiere v116+).');
+    return;
+  }
+  // If already open, focus it
+  if (_pipWindow && !_pipWindow.closed) { _pipWindow.focus(); return; }
+
+  const card = document.getElementById('empYapeCard');
+  const wrap = document.getElementById('empYapeCardWrap');
+  const placeholder = document.getElementById('empYapePipPlaceholder');
+
+  _pipWindow = await window.documentPictureInPicture.requestWindow({
+    width: 340, height: 190,
+    disallowReturnToOpener: false,
+  });
+
+  // Copy stylesheet link so card looks identical
+  const link = document.createElement('link');
+  link.rel  = 'stylesheet';
+  link.href = document.querySelector('link[rel="stylesheet"]').href;
+  _pipWindow.document.head.appendChild(link);
+
+  // Compact overrides for the floating window
+  const style = document.createElement('style');
+  style.textContent = `
+    body { margin:0; padding:10px; background:#f0f4f8; font-family:'Segoe UI',system-ui,sans-serif; }
+    .card { margin-bottom:0 !important; box-shadow:none; border:1px solid #e2e8f0; }
+    #btnPip { display:none; }
+  `;
+  _pipWindow.document.head.appendChild(style);
+
+  _pipWindow.document.body.appendChild(card);
+  if (placeholder) placeholder.classList.remove('hidden');
+
+  // Restore card to main page when PiP is closed
+  _pipWindow.addEventListener('pagehide', () => {
+    if (wrap) wrap.insertBefore(card, placeholder);
+    if (placeholder) placeholder.classList.add('hidden');
+    _pipWindow = null;
+  });
 }
 
 // ============================================================
@@ -1427,6 +1483,7 @@ function pdfRow(doc, label, value, y, mg, pw, DARK, BLUE) {
 //  INACTIVITY TIMER
 // ============================================================
 function startInactivityTimer() {
+  if (userRole === 'employee') return; // employees stay logged in indefinitely
   ['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(ev =>
     document.addEventListener(ev, resetInactivityTimer, { passive: true })
   );

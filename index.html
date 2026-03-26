@@ -330,20 +330,29 @@
         </div>
 
         <!-- Yapes — solo ingreso, sin historial -->
-        <div class="card" style="margin-bottom:18px">
-          <div class="card-head"><h3>💳 Registrar Yape</h3></div>
-          <div class="card-body">
-            <label class="field-label">Monto recibido por Yape</label>
-            <div style="display:flex;gap:10px">
-              <div class="input-wrap" style="flex:1">
-                <span class="prefix">S/.</span>
-                <input type="number" id="empYapeInput" class="form-control"
-                  placeholder="0.00" min="0" step="0.01"
-                  onkeydown="if(event.key==='Enter'){event.preventDefault();addEmpYape()}">
-              </div>
-              <button class="btn btn-primary" onclick="addEmpYape()">Agregar</button>
+        <div id="empYapeCardWrap">
+          <div id="empYapeCard" class="card" style="margin-bottom:18px">
+            <div class="card-head">
+              <h3>💳 Registrar Yape</h3>
+              <button class="btn btn-secondary btn-sm" id="btnPip" onclick="openYapeWidget()">📌 Flotar</button>
             </div>
-            <p id="empYapeFeedback" style="margin-top:8px;font-size:13px;color:#059669;font-weight:600;min-height:18px"></p>
+            <div class="card-body">
+              <label class="field-label">Monto recibido por Yape</label>
+              <div style="display:flex;gap:10px">
+                <div class="input-wrap" style="flex:1">
+                  <span class="prefix">S/.</span>
+                  <input type="number" id="empYapeInput" class="form-control"
+                    placeholder="0.00" min="0" step="0.01"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();addEmpYape()}">
+                </div>
+                <button class="btn btn-primary" onclick="addEmpYape()">Agregar</button>
+              </div>
+              <p id="empYapeFeedback" style="margin-top:8px;font-size:13px;color:#059669;font-weight:600;min-height:18px"></p>
+            </div>
+          </div>
+          <!-- Shown while card is in the floating PiP window -->
+          <div id="empYapePipPlaceholder" class="pip-placeholder hidden">
+            📌 Widget activo en ventana flotante
           </div>
         </div>
 
