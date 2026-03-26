@@ -161,30 +161,40 @@ function _showEmployeeView() {
         <div class="info-val" style="font-size:12px;line-height:1.4">${fechaStr}</div>
       </div>`;
     renderEventos();
-    // Populate employee yapes textarea from shared state
-    const empTA = document.getElementById('empYapesInput');
-    if (empTA) empTA.value = state.yapesRaw || '';
   }
 }
 
-// Sync yapesInput textarea → state.yapesRaw and vice-versa
+// Sync state.yapesRaw → admin yapesInput textarea
 function _syncYapesToDom() {
   const el = document.getElementById('yapesInput');
   if (el && el.value !== state.yapesRaw) {
     el.value = state.yapesRaw || '';
-    onYapesInput(); // rebuild chips + recalculate
+    onYapesInput();
   }
 }
 
-// Employee's textarea mirrors the same content via state.yapesRaw
-function onEmpYapesInput() {
-  const el = document.getElementById('empYapesInput');
-  if (!el) return;
-  state.yapesRaw = el.value;
-  // Keep admin textarea in sync on same device
+// Employee appends a single amount — never sees existing values
+function addEmpYape() {
+  const input    = document.getElementById('empYapeInput');
+  const feedback = document.getElementById('empYapeFeedback');
+  const v = round2(parseFloat(input.value));
+  if (isNaN(v) || v <= 0) { input.focus(); return; }
+
+  // Append as new line to the shared yapesRaw
+  state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') + v.toFixed(2);
+
+  // Keep admin textarea in sync if on same device
   const adminEl = document.getElementById('yapesInput');
-  if (adminEl) adminEl.value = el.value;
+  if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
+
+  input.value = '';
+  input.focus();
   saveState();
+
+  if (feedback) {
+    feedback.textContent = `✓ S/. ${v.toFixed(2)} registrado`;
+    setTimeout(() => { if (feedback) feedback.textContent = ''; }, 2500);
+  }
 }
 
 // ============================================================
@@ -306,9 +316,7 @@ function _applyRemoteState(remote) {
     set('cajaInicialExacto', state.cajaInicial      || 0);
     set('ventasHastaAhora',  state.ventasHastaAhora || 0);
     set('ultimoYape',        state.ultimoYape        || 0);
-    // Sync yapes textareas on both views
-    set('yapesInput',    state.yapesRaw);
-    set('empYapesInput', state.yapesRaw);
+    set('yapesInput', state.yapesRaw);
   }
 }
 
