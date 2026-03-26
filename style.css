@@ -609,21 +609,6 @@ kbd {
   border-top: 1px solid #e2e8f0;
 }
 
-/* ============ EMPLOYEE YAPES ADMIN ROW ============ */
-.emp-yapes-admin-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-  padding: 7px 12px;
-  background: #f0fdf4;
-  border: 1px dashed #86efac;
-  border-radius: 7px;
-  font-size: 13px;
-}
-.emp-yapes-label { color: #166534; font-weight: 600; }
-.emp-yapes-val   { color: #059669; font-weight: 700; font-size: 14px; }
-
 /* ============ EVENTOS ============ */
 .evento-item {
   display: flex;

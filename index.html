@@ -138,11 +138,6 @@
             <span>Total Yapes</span>
             <span class="inline-amount" id="totalYapesDisplay">S/. 0.00</span>
           </div>
-          <!-- Yapes agregados por el empleado (solo visibles para admin) -->
-          <div id="empYapesAdminRow" class="emp-yapes-admin-row hidden">
-            <span class="emp-yapes-label">+ Yapes de empleado</span>
-            <span id="empYapesAdminVal" class="emp-yapes-val">S/. 0.00</span>
-          </div>
         </div>
       </div>
 
@@ -334,24 +329,13 @@
           </div>
         </div>
 
-        <!-- Yapes — empleado solo ingresa, no ve los del admin -->
+        <!-- Yapes — mismo textarea que usa el admin, sincronizado vía estado -->
         <div class="card" style="margin-bottom:18px">
-          <div class="card-head">
-            <h3>💳 Agregar Yape</h3>
-            <span id="empYapeCount" style="font-size:13px;color:#64748b;font-weight:600"></span>
-          </div>
+          <div class="card-head"><h3>💳 Yapes Recibidos</h3></div>
           <div class="card-body">
-            <label class="field-label">Monto recibido por Yape</label>
-            <div style="display:flex;gap:10px;align-items:flex-end">
-              <div class="input-wrap" style="flex:1">
-                <span class="prefix">S/.</span>
-                <input type="number" id="empYapeInput" class="form-control" placeholder="0.00"
-                  min="0" step="0.01"
-                  onkeydown="if(event.key==='Enter'){event.preventDefault();addYapeEmpleado()}">
-              </div>
-              <button class="btn btn-primary" onclick="addYapeEmpleado()">Agregar</button>
-            </div>
-            <div id="empYapesResumen" style="margin-top:10px"></div>
+            <label class="field-label">Un monto por línea — presiona Enter para agregar otro</label>
+            <textarea id="empYapesInput" class="form-control yapes-textarea" rows="4"
+              placeholder="15.50&#10;30.00&#10;8.75" oninput="onEmpYapesInput()"></textarea>
           </div>
         </div>
 
