@@ -223,42 +223,53 @@ async function openYapeWidget() {
   const placeholder = document.getElementById('empYapePipPlaceholder');
 
   _pipWindow = await window.documentPictureInPicture.requestWindow({
-    width: 115, height: 46,
+    width: 100, height: 40,
     disallowReturnToOpener: false,
   });
 
-  const style = document.createElement('style');
+  const D = _pipWindow.document;
+  const style = D.createElement('style');
+  // Content fills whatever size the browser gives (browser has a minimum ~200px wide)
+  // On fade: background becomes transparent so the OS desktop shows through the content area
   style.textContent = `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: #1e3a5f; display: flex; align-items: center; justify-content: center;
-      height: 100vh; gap: 4px; padding: 0 5px;
+    html, body {
+      width: 100%; height: 100%;
+      background: rgba(20,40,80,0.92);
+      display: flex; align-items: center; justify-content: center;
+      gap: 4px; padding: 0 6px;
       font-family: 'Segoe UI', system-ui, sans-serif;
-      opacity: 1; transition: opacity 1.4s ease;
+      transition: background 1.4s ease, opacity 1.4s ease;
     }
-    body.faded { opacity: 0.10; }
-    .w { position: relative; display: flex; align-items: center; }
-    .p { position: absolute; left: 4px; font-size: 9px; font-weight: 700;
-         color: #94a3b8; pointer-events: none; }
-    #pi { width: 64px; padding: 3px 3px 3px 18px; border: none; border-radius: 4px;
-          font-size: 11px; font-family: inherit; outline: none; height: 22px; }
+    html.faded, html.faded body {
+      background: transparent !important;
+      opacity: 0.08;
+    }
+    .w { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+    .p  { position: absolute; left: 5px; font-size: 10px; font-weight: 700;
+          color: #94a3b8; pointer-events: none; user-select: none; }
+    #pi { width: 100%; height: 26px; padding: 0 4px 0 22px;
+          border: none; border-radius: 4px;
+          font-size: 12px; font-family: inherit; outline: none; background: #fff; }
     #pi:focus { box-shadow: 0 0 0 2px #60a5fa; }
-    #pb { width: 22px; height: 22px; background: #2563eb; color: #fff; border: none;
-          border-radius: 4px; font-size: 15px; font-weight: 700; cursor: pointer;
-          display: flex; align-items: center; justify-content: center; line-height: 1; }
+    #pb { flex-shrink: 0; width: 26px; height: 26px;
+          background: #2563eb; color: #fff; border: none; border-radius: 4px;
+          font-size: 17px; font-weight: 700; cursor: pointer; line-height: 1;
+          display: flex; align-items: center; justify-content: center; }
     #pb:hover { background: #1d4ed8; }
-    #pk { font-size: 10px; font-weight: 700; color: #86efac; min-width: 10px; }
+    #pk { flex-shrink: 0; width: 14px; font-size: 11px;
+          font-weight: 700; color: #86efac; text-align: center; }
   `;
-  _pipWindow.document.head.appendChild(style);
+  D.head.appendChild(style);
 
-  _pipWindow.document.body.innerHTML = `
-    <div class="w"><span class="p">S/.</span><input id="pi" type="number" placeholder="0.00" min="0" step="0.01" autofocus></div>
-    <button id="pb">+</button>
-    <span id="pk"></span>
-  `;
+  D.body.innerHTML = `
+    <div class="w"><span class="p">S/.</span>
+      <input id="pi" type="number" placeholder="0.00" min="0" step="0.01" autofocus>
+    </div>
+    <button id="pb">+</button><span id="pk"></span>`;
 
-  const pipInput = _pipWindow.document.getElementById('pi');
-  const pipOk    = _pipWindow.document.getElementById('pk');
+  const pipInput = D.getElementById('pi');
+  const pipOk    = D.getElementById('pk');
 
   function pipAdd() {
     const v = round2(parseFloat(pipInput.value));
@@ -273,18 +284,18 @@ async function openYapeWidget() {
     setTimeout(() => { pipOk.textContent = ''; }, 1000);
   }
 
-  _pipWindow.document.getElementById('pb').addEventListener('click', pipAdd);
+  D.getElementById('pb').addEventListener('click', pipAdd);
   pipInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pipAdd(); } });
 
-  // Fade to near-invisible after 15s of no interaction
+  // After 15s inactive: content area becomes transparent (shows through to OS desktop)
   let _fadeTimer = null;
   function resetFade() {
     clearTimeout(_fadeTimer);
-    _pipWindow.document.body.classList.remove('faded');
-    _fadeTimer = setTimeout(() => _pipWindow.document.body.classList.add('faded'), 15000);
+    D.documentElement.classList.remove('faded');
+    _fadeTimer = setTimeout(() => D.documentElement.classList.add('faded'), 15000);
   }
   ['mousemove','mousedown','keydown','touchstart'].forEach(ev =>
-    _pipWindow.document.addEventListener(ev, resetFade, { passive: true })
+    D.addEventListener(ev, resetFade, { passive: true })
   );
   resetFade();
 
