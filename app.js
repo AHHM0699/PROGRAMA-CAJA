@@ -1552,6 +1552,7 @@ function stopInactivityTimer() {
 }
 
 function resetInactivityTimer() {
+  if (userRole === 'employee') return;
   clearTimeout(_inactivityTimer);
   clearTimeout(_warningTimer);
   clearInterval(_countdownInterval);
@@ -1562,6 +1563,7 @@ function resetInactivityTimer() {
 }
 
 function _showInactivityWarning() {
+  if (userRole === 'employee') return;
   const warn = document.getElementById('inactivityWarning');
   if (!warn) return;
   warn.classList.remove('hidden');
