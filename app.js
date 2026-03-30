@@ -659,6 +659,7 @@ function onYapesInput() {
   document.getElementById('totalYapesDisplay').textContent = fmt(total);
   state.yapesRaw = document.getElementById('yapesInput').value;
   calcularEsperado();
+  saveState();
 }
 
 function getTotalYapes() {
