@@ -1562,13 +1562,7 @@ function pdfRow(doc, label, value, y, mg, pw, DARK, BLUE) {
 // ============================================================
 //  INACTIVITY TIMER
 // ============================================================
-function startInactivityTimer() {
-  if (userRole === 'employee') return; // employees stay logged in indefinitely
-  ['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(ev =>
-    document.addEventListener(ev, resetInactivityTimer, { passive: true })
-  );
-  resetInactivityTimer();
-}
+function startInactivityTimer() { /* auto-logout disabled */ }
 
 function stopInactivityTimer() {
   clearTimeout(_inactivityTimer);
@@ -1576,19 +1570,9 @@ function stopInactivityTimer() {
   clearInterval(_countdownInterval);
 }
 
-function resetInactivityTimer() {
-  if (userRole === 'employee') return;
-  clearTimeout(_inactivityTimer);
-  clearTimeout(_warningTimer);
-  clearInterval(_countdownInterval);
-  document.getElementById('inactivityWarning')?.classList.add('hidden');
-
-  _warningTimer    = setTimeout(_showInactivityWarning, INACTIVITY_MS - WARNING_AHEAD_MS);
-  _inactivityTimer = setTimeout(() => { clearInterval(_countdownInterval); logout(); }, INACTIVITY_MS);
-}
+function resetInactivityTimer() { /* auto-logout disabled */ }
 
 function _showInactivityWarning() {
-  if (userRole === 'employee') return;
   const warn = document.getElementById('inactivityWarning');
   if (!warn) return;
   warn.classList.remove('hidden');
