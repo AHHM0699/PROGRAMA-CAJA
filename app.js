@@ -163,7 +163,31 @@ function _showEmployeeView() {
         <div class="info-val" style="font-size:12px;line-height:1.4">${fechaStr}</div>
       </div>`;
     renderEventos();
+    _renderEmpYapesList();
   }
+}
+
+function _renderEmpYapesList() {
+  const body = document.getElementById('empYapesListBody');
+  if (!body) return;
+  const items = (state.yapesRaw || '').split('\n')
+    .map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v > 0);
+  if (items.length === 0) {
+    body.innerHTML = '<p style="color:#9ca3af;font-size:13px">No hay yapes registrados aún.</p>';
+    return;
+  }
+  const total = round2(items.reduce((s, v) => s + v, 0));
+  body.innerHTML =
+    items.map((v, i) => `
+      <div style="display:flex;justify-content:space-between;padding:6px 0;
+                  border-bottom:1px solid #f3f4f6;font-size:14px">
+        <span style="color:#6b7280">#${i + 1}</span>
+        <span style="font-weight:600;color:#111827">S/. ${v.toFixed(2)}</span>
+      </div>`).join('') +
+    `<div style="display:flex;justify-content:space-between;padding:8px 0 2px;
+                font-size:14px;font-weight:700;color:#2563eb">
+       <span>Total</span><span>S/. ${total.toFixed(2)}</span>
+     </div>`;
 }
 
 // Sync state.yapesRaw → admin yapesInput textarea
@@ -198,6 +222,7 @@ function addEmpYape() {
   input.value = '';
   input.focus();
   saveState();
+  _renderEmpYapesList();
 
   if (feedback) {
     feedback.textContent = `✓ S/. ${v.toFixed(2)} registrado`;
