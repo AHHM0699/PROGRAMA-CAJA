@@ -243,8 +243,6 @@ async function openYapeWidget() {
   // If already open, focus it
   if (_pipWindow && !_pipWindow.closed) { _pipWindow.focus(); return; }
 
-  const card = document.getElementById('empYapeCard');
-  const wrap = document.getElementById('empYapeCardWrap');
   const placeholder = document.getElementById('empYapePipPlaceholder');
 
   _pipWindow = await window.documentPictureInPicture.requestWindow({
