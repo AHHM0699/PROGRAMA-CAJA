@@ -301,6 +301,7 @@ async function openYapeWidget() {
     const adminEl = document.getElementById('yapesInput');
     if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
     saveState();
+    _renderEmpYapesList();
     pipInput.value = '';
     pipInput.focus();
     pipOk.textContent = '✓';
