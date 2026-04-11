@@ -1,49 +1,27 @@
 # Crea un acceso directo en el Escritorio que abre el widget de Yapes
-# como app independiente (sin barra de navegador)
+# siempre visible (por encima de todas las ventanas), tamaño compacto
 
-$widgetPath = "file:///C:/Users/Che%20plas/PROGRAMA-CAJA/yapes-widget.html"
+$scriptDir    = "C:\Users\Che plas\PROGRAMA-CAJA"
+$launcherPath = "$scriptDir\lanzar-yapes.ps1"
 
-# Buscar Brave en ubicaciones comunes
-$bravePaths = @(
-    "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-    "C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-    "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\Application\brave.exe"
-)
+$desktop  = [System.Environment]::GetFolderPath("Desktop")
+$shortcut = "$desktop\Yapes - Che plaS.lnk"
 
-$brave = $null
-foreach ($p in $bravePaths) {
-    if (Test-Path $p) { $brave = $p; break }
-}
+$shell = New-Object -ComObject WScript.Shell
+$lnk   = $shell.CreateShortcut($shortcut)
 
-if (-not $brave) {
-    Write-Host "No se encontro Brave. Buscando..." -ForegroundColor Yellow
-    $brave = Get-Command brave -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-}
-
-if (-not $brave) {
-    Write-Host "ERROR: No se encontro Brave instalado." -ForegroundColor Red
-    Write-Host "Instala Brave o edita la ruta en este script." -ForegroundColor Red
-    pause
-    exit 1
-}
-
-Write-Host "Brave encontrado en: $brave" -ForegroundColor Green
-
-# Crear acceso directo en el Escritorio
-$desktop    = [System.Environment]::GetFolderPath("Desktop")
-$shortcut   = "$desktop\Yapes - Che plaS.lnk"
-$shell      = New-Object -ComObject WScript.Shell
-$lnk        = $shell.CreateShortcut($shortcut)
-
-$lnk.TargetPath       = $brave
-$lnk.Arguments        = "--app=`"$widgetPath`" --window-size=280,400"
-$lnk.WorkingDirectory = Split-Path $brave
-$lnk.Description      = "Widget de Yapes - Che plaS"
+$lnk.TargetPath       = "powershell.exe"
+$lnk.Arguments        = "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcherPath`""
+$lnk.WorkingDirectory = $scriptDir
+$lnk.Description      = "Widget de Yapes - Che plaS (siempre visible)"
+$lnk.WindowStyle      = 7   # 7 = minimized/hidden (no flash de consola)
 $lnk.Save()
 
 Write-Host ""
-Write-Host "Acceso directo creado en el Escritorio:" -ForegroundColor Green
-Write-Host "  'Yapes - Che plaS.lnk'" -ForegroundColor Cyan
+Write-Host "Acceso directo creado:" -ForegroundColor Green
+Write-Host "  '$shortcut'" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abrelo desde el Escritorio. Puedes anclarlo a la barra de tareas." -ForegroundColor White
+Write-Host "El widget se abrira siempre en la esquina inferior derecha" -ForegroundColor White
+Write-Host "y se mantendra sobre todas las demas ventanas." -ForegroundColor White
+Write-Host ""
 pause
