@@ -73,6 +73,13 @@ let _countdownInterval   = null;
 let currentEventoTipo    = 'Egreso';
 let currentEventoSubtipo = 'Efectivo';
 
+// Flujo de caja mensual
+let _currentFlujoMes  = null;
+let _flujoUnsub       = null;
+let _egresoscajaCache = [];
+let _flujoDocCache    = {};
+let _flujoCharts      = {};
+
 // ============================================================
 //  INIT
 // ============================================================
@@ -160,6 +167,7 @@ function _applyRoleUI() {
   const isEmp = userRole === 'employee';
   document.getElementById('empleadoBadge').classList.toggle('hidden', !isEmp);
   document.getElementById('btnHistorial').style.display = isEmp ? 'none' : '';
+  document.getElementById('btnFlujo').style.display     = isEmp ? 'none' : '';
   document.getElementById('btnCajas').classList.toggle('hidden', false); // siempre visible tras login
 }
 
@@ -292,7 +300,7 @@ function showView(view) {
   if (userRole === 'employee') { _showEmployeeView(); return; }
   if (view === 'auto') view = state.cajaAbierta ? 'cierre' : 'apertura';
 
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado'].forEach(id =>
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   const cap = view.charAt(0).toUpperCase() + view.slice(1);
@@ -531,6 +539,7 @@ function loadScript(url, integrity) {
   });
 }
 
+const CHARTJS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
 const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
 const JSPDF_SRI = 'sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==';
 const XLSX_URL  = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.mini.min.js';
@@ -1066,6 +1075,8 @@ function openEventosModal() {
   document.getElementById('evSubtipoWrap').style.display = 'none';
   document.getElementById('tglSubEfectivo').classList.add('active');
   document.getElementById('tglSubYape').classList.remove('active');
+  document.getElementById('evIncluirFlujo').checked = true;
+  document.getElementById('evIncluirFlujoWrap').style.display = '';
   document.getElementById('eventosModal').classList.remove('hidden');
 }
 
@@ -1079,6 +1090,7 @@ function setEventoTipo(tipo) {
   document.getElementById('evFieldsBasic').style.display  = tipo === 'Divisa' ? 'none' : '';
   document.getElementById('evFieldsDivisa').classList.toggle('hidden', tipo !== 'Divisa');
   document.getElementById('evSubtipoWrap').style.display  = tipo === 'Ingreso' ? '' : 'none';
+  document.getElementById('evIncluirFlujoWrap').style.display = tipo === 'Egreso' ? '' : 'none';
 }
 
 function setEventoSubtipo(subtipo) {
@@ -1107,13 +1119,15 @@ function addEvento() {
     if (!monto) { alert('Ingresa un monto válido.'); return; }
   }
   if (!state.eventos) state.eventos = [];
+  const incluirFlujoEl = document.getElementById('evIncluirFlujo');
   state.eventos.push({
     id: Date.now(), tipo: currentEventoTipo,
     subtipo: currentEventoTipo === 'Ingreso' ? currentEventoSubtipo : null,
     desc, monto,
-    usd:   currentEventoTipo === 'Divisa' ? usd : null,
-    tc:    currentEventoTipo === 'Divisa' ? tc  : null,
-    fecha: new Date().toISOString(),
+    usd:           currentEventoTipo === 'Divisa' ? usd : null,
+    tc:            currentEventoTipo === 'Divisa' ? tc  : null,
+    fecha:         new Date().toISOString(),
+    incluirEnFlujo: currentEventoTipo === 'Egreso' ? (incluirFlujoEl ? incluirFlujoEl.checked : true) : undefined,
   });
   saveState(); renderEventos(); calcularEsperado(); closeEventosModal();
 }
@@ -1326,6 +1340,347 @@ function pdfRow(doc,label,value,y,mg,pw,DARK,BLUE){
   doc.setFont('helvetica','bold'); doc.setTextColor(...BLUE);
   doc.text(value,pw-mg-2,y,{align:'right'});
   doc.setDrawColor(235,235,235); doc.line(mg,y+2.5,pw-mg,y+2.5); return y+8;
+}
+
+// ============================================================
+//  FLUJO DE CAJA MENSUAL
+// ============================================================
+
+function _flujoMesActual() {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;
+}
+
+function flujoRef(mes) { return db.doc(`flujo/${mes}`); }
+
+function _getMesLabel(mes) {
+  const [y, m] = mes.split('-').map(Number);
+  const names = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                 'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  return `${names[m-1]} ${y}`;
+}
+
+function showFlujoView() {
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado'].forEach(id =>
+    document.getElementById(id).classList.add('hidden')
+  );
+  document.getElementById('viewFlujo').classList.remove('hidden');
+  initFlujoView(_currentFlujoMes || _flujoMesActual());
+}
+
+function cambiarMesFlujo(delta) {
+  const [y, m] = _currentFlujoMes.split('-').map(Number);
+  let nm = m + delta, ny = y;
+  if (nm < 1)  { nm = 12; ny--; }
+  if (nm > 12) { nm = 1;  ny++; }
+  initFlujoView(`${ny}-${String(nm).padStart(2,'0')}`);
+}
+
+async function initFlujoView(mes) {
+  _currentFlujoMes = mes;
+  document.getElementById('flujoMesLabel').textContent = _getMesLabel(mes);
+
+  if (_flujoUnsub) { _flujoUnsub(); _flujoUnsub = null; }
+
+  // Cargar Chart.js si no está
+  await loadScript(CHARTJS_URL);
+  if (!_flujoCharts.bars) _initFlujoCharts();
+
+  // Snapshot en tiempo real del doc de flujo del mes
+  _flujoUnsub = flujoRef(mes).onSnapshot(snap => {
+    _flujoDocCache = snap.exists ? snap.data() : {};
+    _renderFlujoDashboard();
+  }, e => console.warn('flujo snapshot:', e));
+
+  // Egresos de caja (carga única, con botón de refresh)
+  _egresoscajaCache = [];
+  document.getElementById('flujoEgresosCajaList').innerHTML =
+    '<p class="no-data" style="padding:20px 0">Cargando…</p>';
+  getEgresosCajaDelMes(mes).then(list => {
+    _egresoscajaCache = list;
+    _renderFlujoDashboard();
+    _renderEgresosCajaList();
+  });
+}
+
+async function getEgresosCajaDelMes(mes) {
+  const results = [];
+  const [y, m] = mes.split('-').map(Number);
+  const prev = m === 1  ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,'0')}`;
+  const next = m === 12 ? `${y+1}-01` : `${y}-${String(m+1).padStart(2,'0')}`;
+
+  try {
+    const snap = await historialCol
+      .where('fecha', '>=', `${prev}-01`)
+      .where('fecha', '<=', `${next}-31T23:59:59`)
+      .get();
+    snap.forEach(doc => {
+      const d = doc.data();
+      (d.eventos || []).forEach(ev => {
+        if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
+            (ev.fecha || '').startsWith(mes))
+          results.push({ ...ev, cajaNombre: d.cajaNombre || '' });
+      });
+    });
+  } catch(e) { console.warn('getEgresosCaja historial:', e); }
+
+  try {
+    const snap = await db.collection('cajas').get();
+    snap.forEach(doc => {
+      const d = doc.data();
+      (d.eventos || []).forEach(ev => {
+        if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
+            (ev.fecha || '').startsWith(mes))
+          results.push({ ...ev, cajaNombre: d.nombre || '' });
+      });
+    });
+  } catch(e) { console.warn('getEgresosCaja cajas:', e); }
+
+  return results;
+}
+
+async function refreshEgresosCaja() {
+  document.getElementById('flujoEgresosCajaList').innerHTML =
+    '<p class="no-data" style="padding:20px 0">Cargando…</p>';
+  _egresoscajaCache = await getEgresosCajaDelMes(_currentFlujoMes);
+  _renderFlujoDashboard();
+  _renderEgresosCajaList();
+}
+
+function _getFlujoTotals() {
+  const d = _flujoDocCache;
+  const vHist = d.ventasHistorial  || {};
+  const pHist = d.planillaHistorial || {};
+
+  const lastV = Object.keys(vHist).sort().pop();
+  const lastP = Object.keys(pHist).sort().pop();
+
+  const ventas   = lastV ? (vHist[lastV] || 0) : 0;
+  const planilla = lastP ? (pHist[lastP] || 0) : 0;
+  const totalPagos      = (d.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
+  const totalEgresosCaja = _egresoscajaCache.reduce((s, e) => s + (e.monto || 0), 0);
+  const totalEgresos = round2(planilla + totalPagos + totalEgresosCaja);
+  const utilidad     = round2(ventas - totalEgresos);
+
+  return { ventas, planilla, totalPagos, totalEgresosCaja, totalEgresos, utilidad, vHist, pHist, lastV, lastP };
+}
+
+function _renderFlujoDashboard() {
+  const { ventas, planilla, totalPagos, totalEgresosCaja,
+          totalEgresos, utilidad, vHist, pHist, lastV, lastP } = _getFlujoTotals();
+
+  // KPIs
+  document.getElementById('kpiVentas').textContent  = fmt(ventas);
+  document.getElementById('kpiEgresos').textContent = fmt(totalEgresos);
+  const kpiU    = document.getElementById('kpiUtilidad');
+  const kpiCard = document.getElementById('kpiUtilidadCard');
+  const kpiIcon = document.getElementById('kpiUtilidadIcon');
+  kpiU.textContent = (utilidad < 0 ? '− ' : '') + fmt(Math.abs(utilidad));
+  kpiCard.classList.toggle('utilidad-neg', utilidad < 0);
+  kpiIcon.textContent = utilidad >= 0 ? '✅' : '⚠️';
+
+  // Desglose
+  document.getElementById('flujoDesgPlanilla').textContent = fmt(planilla);
+  document.getElementById('flujoDesgPagos').textContent    = fmt(totalPagos);
+  document.getElementById('flujoDesgCaja').textContent     = fmt(totalEgresosCaja);
+  document.getElementById('flujoDesgTotal').textContent    = fmt(totalEgresos);
+
+  // Inputs (solo si no están enfocados)
+  const vIn = document.getElementById('flujoVentasInput');
+  const pIn = document.getElementById('flujoPlanillaInput');
+  if (document.activeElement !== vIn) {
+    vIn.value = lastV ? (vHist[lastV] || '') : '';
+    document.getElementById('flujoVentasUlt').textContent =
+      lastV ? new Date(lastV + 'T12:00:00').toLocaleDateString('es-PE') : '—';
+  }
+  if (document.activeElement !== pIn) {
+    pIn.value = lastP ? (pHist[lastP] || '') : '';
+    document.getElementById('flujoPlanillaUlt').textContent =
+      lastP ? new Date(lastP + 'T12:00:00').toLocaleDateString('es-PE') : '—';
+  }
+
+  _renderPagosList();
+  _updateFlujoCharts(ventas, planilla, totalPagos, totalEgresosCaja, utilidad, vHist);
+}
+
+function _renderPagosList() {
+  const pagos = [...(_flujoDocCache.pagos || [])].sort((a,b) =>
+    (b.fecha||'').localeCompare(a.fecha||''));
+  const el = document.getElementById('flujoPagosList');
+  if (!el) return;
+  if (!pagos.length) {
+    el.innerHTML = '<p class="no-data" style="padding:20px 0">No hay pagos registrados este mes.</p>';
+    return;
+  }
+  el.innerHTML = pagos.map(p => `
+    <div class="flujo-pago-item">
+      <div class="flujo-pago-info">
+        <span class="flujo-pago-cat">${escHtml(p.categoria)}</span>
+        ${p.desc ? `<span class="flujo-pago-desc">${escHtml(p.desc)}</span>` : ''}
+        <span class="flujo-pago-fecha">${p.fecha ? new Date(p.fecha+'T12:00:00').toLocaleDateString('es-PE') : '—'}</span>
+      </div>
+      <div class="flujo-pago-right">
+        <span class="flujo-pago-monto">− ${fmt(p.monto)}</span>
+        <button class="btn-ev-del" onclick="deletePago('${escHtml(p.id)}')" title="Eliminar">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+function _renderEgresosCajaList() {
+  const el = document.getElementById('flujoEgresosCajaList');
+  if (!el) return;
+  if (!_egresoscajaCache.length) {
+    el.innerHTML = '<p class="no-data" style="padding:20px 0">No hay egresos de caja incluidos en este mes.</p>';
+    return;
+  }
+  el.innerHTML = _egresoscajaCache.map(e => `
+    <div class="flujo-pago-item">
+      <div class="flujo-pago-info">
+        <span class="flujo-pago-cat">${escHtml(e.cajaNombre || 'Caja')}</span>
+        ${e.desc ? `<span class="flujo-pago-desc">${escHtml(e.desc)}</span>` : ''}
+        <span class="flujo-pago-fecha">${e.fecha ? new Date(e.fecha).toLocaleDateString('es-PE') : '—'}</span>
+      </div>
+      <div class="flujo-pago-right">
+        <span class="flujo-pago-monto">− ${fmt(e.monto)}</span>
+      </div>
+    </div>`).join('');
+}
+
+async function saveFlujoField(field, rawValue) {
+  const value = parseFloat(rawValue) || 0;
+  const today = new Date().toISOString().split('T')[0];
+  const hist  = field === 'ventas' ? 'ventasHistorial' : 'planillaHistorial';
+  try {
+    await flujoRef(_currentFlujoMes).set(
+      { mes: _currentFlujoMes, [hist]: { [today]: value } },
+      { merge: true }
+    );
+  } catch(e) { console.error('saveFlujoField:', e); }
+}
+
+function openPagoModal() {
+  document.getElementById('pagoCategoria').value = 'Proveedores';
+  document.getElementById('pagoDesc').value      = '';
+  document.getElementById('pagoMonto').value     = '';
+  document.getElementById('pagoFecha').value     = new Date().toISOString().split('T')[0];
+  document.getElementById('pagoModal').classList.remove('hidden');
+}
+
+function closePagoModal() {
+  document.getElementById('pagoModal').classList.add('hidden');
+}
+
+async function addPago() {
+  const monto = parseFloat(document.getElementById('pagoMonto').value) || 0;
+  if (!monto) { alert('Ingresa un monto válido.'); return; }
+  const pago = {
+    id:        Date.now().toString(),
+    categoria: document.getElementById('pagoCategoria').value,
+    desc:      document.getElementById('pagoDesc').value.trim(),
+    monto,
+    fecha:     document.getElementById('pagoFecha').value,
+  };
+  const pagosActuales = [...(_flujoDocCache.pagos || []), pago];
+  try {
+    await flujoRef(_currentFlujoMes).set(
+      { mes: _currentFlujoMes, pagos: pagosActuales },
+      { merge: true }
+    );
+    closePagoModal();
+  } catch(e) { console.error('addPago:', e); alert('Error al guardar el pago.'); }
+}
+
+async function deletePago(id) {
+  const pagos = (_flujoDocCache.pagos || []).filter(p => p.id !== id);
+  try {
+    await flujoRef(_currentFlujoMes).set({ pagos }, { merge: true });
+  } catch(e) { console.error('deletePago:', e); }
+}
+
+// ── Charts ───────────────────────────────────────────────────
+
+function _initFlujoCharts() {
+  const barCtx  = document.getElementById('flujoBarChart')?.getContext('2d');
+  const donaCtx = document.getElementById('flujoDonaChart')?.getContext('2d');
+  const lineCtx = document.getElementById('flujoLineChart')?.getContext('2d');
+  if (!barCtx || !donaCtx || !lineCtx) return;
+
+  Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+
+  _flujoCharts.bars = new Chart(barCtx, {
+    type: 'bar',
+    data: {
+      labels: ['Ventas', 'Egresos', 'Utilidad'],
+      datasets: [{ data: [0,0,0], backgroundColor: ['#22c55e','#ef4444','#16a34a'], borderRadius: 6, borderSkipped: false }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { callback: v => 'S/.' + v.toLocaleString('es-PE') } } }
+    }
+  });
+
+  _flujoCharts.dona = new Chart(donaCtx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Planilla', 'Pagos externos', 'Egresos caja'],
+      datasets: [{ data: [0,0,0], backgroundColor: ['#f97316','#8b5cf6','#ef4444'], borderWidth: 2, borderColor: '#fff' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true, cutout: '65%',
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 12 } } }
+    }
+  });
+
+  _flujoCharts.line = new Chart(lineCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Ventas acumuladas',
+        data: [], borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,.12)',
+        fill: true, tension: 0.25, pointRadius: 3, pointHoverRadius: 5,
+        borderWidth: 2, stepped: 'before'
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { callback: v => 'S/.' + v.toLocaleString('es-PE') } } }
+    }
+  });
+}
+
+function _updateFlujoCharts(ventas, planilla, totalPagos, totalEgresosCaja, utilidad, vHist) {
+  if (!_flujoCharts.bars) return;
+  const totalEgresos = round2(planilla + totalPagos + totalEgresosCaja);
+
+  // Bar
+  _flujoCharts.bars.data.datasets[0].data = [ventas, totalEgresos, Math.abs(utilidad)];
+  _flujoCharts.bars.data.datasets[0].backgroundColor =
+    ['#22c55e', '#ef4444', utilidad >= 0 ? '#16a34a' : '#dc2626'];
+  _flujoCharts.bars.update('none');
+
+  // Donut
+  _flujoCharts.dona.data.datasets[0].data = [planilla, totalPagos, totalEgresosCaja];
+  _flujoCharts.dona.update('none');
+
+  // Line: evolución de ventas en el mes
+  const [y, m] = _currentFlujoMes.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const todayStr    = new Date().toISOString().split('T')[0];
+  const labels = [], data = [];
+  let lastVal = null;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = `${_currentFlujoMes}-${String(d).padStart(2,'0')}`;
+    if (key > todayStr) break;
+    labels.push(d);
+    if (vHist[key] !== undefined) lastVal = vHist[key];
+    data.push(lastVal);
+  }
+  _flujoCharts.line.data.labels = labels;
+  _flujoCharts.line.data.datasets[0].data = data;
+  _flujoCharts.line.update('none');
 }
 
 // ============================================================

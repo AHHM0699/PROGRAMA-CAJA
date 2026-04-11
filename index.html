@@ -54,6 +54,7 @@
       <span id="cajaNombreDisplay" class="caja-nombre-badge hidden"></span>
       <span id="empleadoBadge" class="empleado-badge hidden">👤 Empleado</span>
       <button id="btnCajas" class="btn btn-ghost hidden" onclick="showCajaSelector()">⇄ Cajas</button>
+      <button id="btnFlujo" class="btn btn-ghost hidden" onclick="showFlujoView()">📊 Flujo</button>
       <button id="btnHistorial" class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
       <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
     </div>
@@ -414,6 +415,138 @@
 
     </div><!-- /viewEmpleado -->
 
+
+    <!-- ========== VISTA: FLUJO DE CAJA ========== -->
+    <div id="viewFlujo" class="view hidden">
+
+      <div class="section-header-row">
+        <div>
+          <h2>📊 Flujo de Caja</h2>
+          <p class="section-sub">Dashboard financiero · actualización automática</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" onclick="cambiarMesFlujo(-1)">‹</button>
+          <span id="flujoMesLabel" style="font-weight:700;font-size:15px;min-width:120px;text-align:center">—</span>
+          <button class="btn btn-secondary btn-sm" onclick="cambiarMesFlujo(1)">›</button>
+          <button class="btn btn-secondary btn-sm" onclick="showView('auto')" style="margin-left:8px">← Volver</button>
+        </div>
+      </div>
+
+      <!-- KPI Cards -->
+      <div class="flujo-kpi-grid">
+        <div class="flujo-kpi flujo-kpi-ventas">
+          <div class="flujo-kpi-icon">💰</div>
+          <div class="flujo-kpi-label">Ventas del mes</div>
+          <div class="flujo-kpi-val" id="kpiVentas">S/. 0.00</div>
+        </div>
+        <div class="flujo-kpi flujo-kpi-egresos">
+          <div class="flujo-kpi-icon">📉</div>
+          <div class="flujo-kpi-label">Total egresos</div>
+          <div class="flujo-kpi-val" id="kpiEgresos">S/. 0.00</div>
+        </div>
+        <div class="flujo-kpi flujo-kpi-utilidad" id="kpiUtilidadCard">
+          <div class="flujo-kpi-icon" id="kpiUtilidadIcon">✅</div>
+          <div class="flujo-kpi-label">Utilidad</div>
+          <div class="flujo-kpi-val" id="kpiUtilidad">S/. 0.00</div>
+        </div>
+      </div>
+
+      <!-- Inputs acumulados -->
+      <div class="card">
+        <div class="card-head"><h3>📝 Datos acumulados del mes</h3></div>
+        <div class="card-body flujo-inputs-grid">
+          <div>
+            <label class="field-label">Ventas acumuladas (S/.)</label>
+            <div class="input-wrap">
+              <span class="prefix">S/.</span>
+              <input type="number" id="flujoVentasInput" class="form-control"
+                placeholder="0.00" step="0.01" min="0"
+                onblur="saveFlujoField('ventas', this.value)">
+            </div>
+            <p class="flujo-hint">Se guarda al salir del campo · última vez: <span id="flujoVentasUlt">—</span></p>
+          </div>
+          <div>
+            <label class="field-label">Planilla acumulada (S/.)</label>
+            <div class="input-wrap">
+              <span class="prefix">S/.</span>
+              <input type="number" id="flujoPlanillaInput" class="form-control"
+                placeholder="0.00" step="0.01" min="0"
+                onblur="saveFlujoField('planilla', this.value)">
+            </div>
+            <p class="flujo-hint">Se guarda al salir del campo · última vez: <span id="flujoPlanillaUlt">—</span></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts row -->
+      <div class="flujo-charts-row">
+        <div class="card flujo-chart-card">
+          <div class="card-head"><h3>Ventas vs Egresos</h3></div>
+          <div class="card-body flujo-chart-body"><canvas id="flujoBarChart"></canvas></div>
+        </div>
+        <div class="card flujo-chart-card">
+          <div class="card-head"><h3>Desglose de egresos</h3></div>
+          <div class="card-body flujo-chart-body"><canvas id="flujoDonaChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Line chart -->
+      <div class="card">
+        <div class="card-head"><h3>Evolución de ventas del mes</h3></div>
+        <div class="card-body" style="padding:14px 16px">
+          <canvas id="flujoLineChart" style="max-height:200px"></canvas>
+        </div>
+      </div>
+
+      <!-- Desglose egresos -->
+      <div class="card">
+        <div class="card-head"><h3>Desglose de egresos</h3></div>
+        <div class="card-body">
+          <div class="flujo-desglose">
+            <div class="flujo-desglose-row">
+              <span class="flujo-desglose-label">👥 Planilla</span>
+              <span class="flujo-desglose-val" id="flujoDesgPlanilla">S/. 0.00</span>
+            </div>
+            <div class="flujo-desglose-row">
+              <span class="flujo-desglose-label">💳 Pagos externos</span>
+              <span class="flujo-desglose-val" id="flujoDesgPagos">S/. 0.00</span>
+            </div>
+            <div class="flujo-desglose-row">
+              <span class="flujo-desglose-label">📦 Egresos de caja</span>
+              <span class="flujo-desglose-val" id="flujoDesgCaja">S/. 0.00</span>
+            </div>
+            <div class="flujo-desglose-row flujo-desglose-total">
+              <span class="flujo-desglose-label">Total egresos</span>
+              <span class="flujo-desglose-val" id="flujoDesgTotal">S/. 0.00</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pagos externos -->
+      <div class="card">
+        <div class="card-head">
+          <h3>💳 Pagos externos del mes</h3>
+          <button class="btn btn-primary btn-sm" onclick="openPagoModal()">＋ Registrar pago</button>
+        </div>
+        <div class="card-body" id="flujoPagosList">
+          <p class="no-data" style="padding:20px 0">No hay pagos registrados este mes.</p>
+        </div>
+      </div>
+
+      <!-- Egresos de caja incluidos -->
+      <div class="card">
+        <div class="card-head">
+          <h3>📦 Egresos de caja incluidos</h3>
+          <button class="btn btn-secondary btn-sm" onclick="refreshEgresosCaja()">↻ Actualizar</button>
+        </div>
+        <div class="card-body" id="flujoEgresosCajaList">
+          <p class="no-data" style="padding:20px 0">Cargando…</p>
+        </div>
+      </div>
+
+    </div><!-- /viewFlujo -->
+
   </div><!-- /app-content -->
 </div><!-- /mainApp -->
 
@@ -447,6 +580,12 @@
         <div class="input-wrap">
           <span class="prefix">S/.</span>
           <input type="number" id="evMonto" class="form-control" placeholder="0.00" min="0" step="0.01">
+        </div>
+        <div id="evIncluirFlujoWrap" style="margin-top:14px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;color:#14532d">
+            <input type="checkbox" id="evIncluirFlujo" checked style="width:16px;height:16px;accent-color:#16a34a">
+            Incluir en flujo de caja mensual
+          </label>
         </div>
       </div>
 
@@ -484,6 +623,46 @@
   </div>
 </div>
 
+
+<!-- ===== MODAL: PAGO EXTERNO ===== -->
+<div id="pagoModal" class="modal-overlay hidden" onclick="if(event.target===this) closePagoModal()">
+  <div class="modal-box" style="max-width:440px">
+    <div class="modal-head">
+      <h3>💳 Registrar pago externo</h3>
+      <button class="btn-close" onclick="closePagoModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">Categoría</label>
+      <select id="pagoCategoria" class="form-control" style="margin-bottom:14px">
+        <option>Proveedores</option>
+        <option>Alquiler</option>
+        <option>Servicios</option>
+        <option>Préstamo / cuota</option>
+        <option>Otros</option>
+      </select>
+      <label class="field-label">Descripción <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
+      <input type="text" id="pagoDesc" class="form-control"
+        placeholder="Ej: Pago Coca-Cola, luz abril…" style="margin-bottom:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label class="field-label">Monto (S/.)</label>
+          <div class="input-wrap">
+            <span class="prefix">S/.</span>
+            <input type="number" id="pagoMonto" class="form-control" placeholder="0.00" step="0.01" min="0">
+          </div>
+        </div>
+        <div>
+          <label class="field-label">Fecha</label>
+          <input type="date" id="pagoFecha" class="form-control">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closePagoModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="addPago()">Registrar</button>
+    </div>
+  </div>
+</div>
 
 <!-- ===== MODAL: CONFIRMAR CIERRE ===== -->
 <div id="cierreConfirmModal" class="modal-overlay hidden" onclick="if(event.target===this) closeCierreConfirm()">
