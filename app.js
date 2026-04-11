@@ -171,10 +171,16 @@ function _applyRoleUI() {
   document.getElementById('btnCajas').classList.toggle('hidden', false);
 }
 
+let _yapesWin = null;
 function openYapesWidget() {
-  // Abre via protocolo personalizado: lanza el widget con HWND_TOPMOST
-  // (requiere haber ejecutado crear-acceso-directo.ps1 una vez)
-  window.location.href = 'cheplas://yapes';
+  // Si ya está abierto, traerlo al frente
+  if (_yapesWin && !_yapesWin.closed) { _yapesWin.focus(); return; }
+  const W    = 200, H = 90;
+  const left = screen.availLeft + 10;
+  const top  = screen.availTop + screen.availHeight - H - 10;
+  const url  = 'yapes-widget.html' + (currentCajaId ? '?cajaId=' + currentCajaId : '');
+  _yapesWin  = window.open(url, 'YapesWidget',
+    `popup,width=${W},height=${H},left=${left},top=${top}`);
 }
 
 async function logout() {
