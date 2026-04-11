@@ -172,15 +172,30 @@ function _applyRoleUI() {
 }
 
 let _yapesWin = null;
-function openYapesWidget() {
-  // Si ya está abierto, traerlo al frente
+async function openYapesWidget() {
+  const url = 'yapes-widget.html' + (currentCajaId ? '?cajaId=' + currentCajaId : '');
+
+  // Document Picture-in-Picture: ventana flotante siempre encima (requiere HTTPS)
+  if ('documentPictureInPicture' in window) {
+    try {
+      const pip = window.documentPictureInPicture;
+      // Si ya está abierto cerrarlo para reabrirlo fresco
+      if (pip.window) pip.window.close();
+      const pipWin = await pip.requestWindow({ width: 200, height: 90 });
+      pipWin.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#000';
+      const iframe = pipWin.document.createElement('iframe');
+      iframe.src = url;
+      iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+      pipWin.document.body.appendChild(iframe);
+      return;
+    } catch(e) { console.warn('PiP no disponible, usando popup:', e); }
+  }
+
+  // Fallback: popup normal (file:// o navegadores sin PiP)
   if (_yapesWin && !_yapesWin.closed) { _yapesWin.focus(); return; }
-  const W    = 200, H = 90;
-  const left = screen.availLeft + 10;
-  const top  = screen.availTop + screen.availHeight - H - 10;
-  const url  = 'yapes-widget.html' + (currentCajaId ? '?cajaId=' + currentCajaId : '');
-  _yapesWin  = window.open(url, 'YapesWidget',
-    `popup,width=${W},height=${H},left=${left},top=${top}`);
+  const W = 200, H = 90;
+  _yapesWin = window.open(url, 'YapesWidget',
+    `popup,width=${W},height=${H},left=${screen.availLeft+10},top=${screen.availTop+screen.availHeight-H-10}`);
 }
 
 async function logout() {
