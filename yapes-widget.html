@@ -253,6 +253,8 @@ let _unsub    = null;
 let _yapesRaw = '';
 let _toastTimer = null;
 
+const _paramCajaId = new URLSearchParams(location.search).get('cajaId');
+
 const COMPACT_W = 200, COMPACT_H = 90;
 const LOGIN_W   = 300, LOGIN_H   = 210;
 
@@ -272,8 +274,22 @@ function goLoginSize() {
 }
 
 auth.onAuthStateChanged(user => {
-  if (user) { goCompact(); show('wStatus'); hide('loginScreen'); loadCajas(); }
-  else       { goLoginSize(); hide('widgetMain'); hide('wStatus'); show('loginScreen'); }
+  if (user) {
+    goCompact();
+    hide('loginScreen');
+    if (_paramCajaId) {
+      show('widgetMain');
+      _setupCaja(_paramCajaId, '');
+    } else {
+      show('wStatus');
+      loadCajas();
+    }
+  } else {
+    goLoginSize();
+    hide('widgetMain');
+    hide('wStatus');
+    show('loginScreen');
+  }
 });
 
 async function wLogin() {
@@ -307,9 +323,9 @@ async function loadCajas() {
   } catch(e) { setStatus('Error'); }
 }
 
-function selectCaja(id, nombre) {
+function _setupCaja(id, nombre) {
   _cajaId = id;
-  document.getElementById('wCajaNombre').textContent = nombre;
+  if (nombre) document.getElementById('wCajaNombre').textContent = nombre;
   if (_unsub) _unsub();
   _unsub = db.doc(`cajas/${id}`).onSnapshot(snap => {
     if (!snap.exists) {
@@ -320,12 +336,20 @@ function selectCaja(id, nombre) {
         '<button class="w-caja-btn" onclick="loadCajas()">↻ Buscar</button>';
       return;
     }
-    _yapesRaw = snap.data().yapesRaw || '';
+    const data = snap.data();
+    _yapesRaw = data.yapesRaw || '';
+    // Mostrar nombre de caja si no fue pasado por parámetro
+    if (!nombre && data.nombre)
+      document.getElementById('wCajaNombre').textContent = data.nombre;
   }, () => {});
+  setTimeout(() => document.getElementById('wYapeInput').focus(), 50);
+}
+
+function selectCaja(id, nombre) {
   hide('wStatus');
   document.getElementById('widgetMain').style.display = 'flex';
   goCompact();
-  setTimeout(() => document.getElementById('wYapeInput').focus(), 50);
+  _setupCaja(id, nombre);
 }
 
 async function wAddYape() {

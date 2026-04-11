@@ -168,7 +168,18 @@ function _applyRoleUI() {
   document.getElementById('empleadoBadge').classList.toggle('hidden', !isEmp);
   document.getElementById('btnHistorial').classList.toggle('hidden', isEmp);
   document.getElementById('btnFlujo').classList.toggle('hidden', isEmp);
-  document.getElementById('btnCajas').classList.toggle('hidden', false); // siempre visible tras login
+  document.getElementById('btnCajas').classList.toggle('hidden', false);
+}
+
+let _yapesWin = null;
+function openYapesWidget() {
+  if (_yapesWin && !_yapesWin.closed) { _yapesWin.focus(); return; }
+  const W = 200, H = 90;
+  const left = screen.availLeft + 10;
+  const top  = screen.availTop + screen.availHeight - H - 10;
+  const url  = 'yapes-widget.html' + (currentCajaId ? '?cajaId=' + currentCajaId : '');
+  _yapesWin  = window.open(url, 'YapesWidget',
+    `popup,width=${W},height=${H},left=${left},top=${top}`);
 }
 
 async function logout() {
@@ -254,6 +265,7 @@ async function selectCaja(cajaId) {
   startRealtimeSync();
 
   document.getElementById('cajaSelectorScreen').style.display = 'none';
+  document.getElementById('btnYapes').classList.remove('hidden');
   _updateCajaHeader();
   showView('auto');
 }
