@@ -49,6 +49,18 @@ Set-ItemProperty -Path "$base\shell\open\command" -Name "(Default)" -Value $cmd
 
 Write-Host "Protocolo cheplas:// registrado" -ForegroundColor Green
 
+# Registrar tambien cheplas://topmost → setTopmost-yapes.vbs
+# Usado por el boton de la webapp para hacer la ventana siempre visible
+$topmostVbs = "$scriptDir\setTopmost-yapes.vbs"
+$base2 = "HKCU:\SOFTWARE\Classes\cheplastopmost"
+New-Item -Path $base2 -Force | Out-Null
+Set-ItemProperty -Path $base2 -Name "(Default)"    -Value "URL:Che plaS Topmost"
+Set-ItemProperty -Path $base2 -Name "URL Protocol" -Value ""
+New-Item -Path "$base2\shell\open\command" -Force | Out-Null
+Set-ItemProperty -Path "$base2\shell\open\command" -Name "(Default)" -Value "`"wscript.exe`" `"$topmostVbs`" `"%1`""
+
+Write-Host "Protocolo cheplastopmost:// registrado" -ForegroundColor Green
+
 # ── 3. Crear acceso directo en el Escritorio ───────────────────────────────
 $desktop  = [System.Environment]::GetFolderPath("Desktop")
 $shortcut = "$desktop\Yapes - Che plaS.lnk"
