@@ -277,6 +277,9 @@ firebase.initializeApp({
 const auth = firebase.auth();
 const db   = firebase.firestore();
 
+// Forzar persistencia local para que la sesión sobreviva entre aperturas
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+
 let _cajaId   = null;
 let _unsub    = null;
 let _yapesRaw = '';
