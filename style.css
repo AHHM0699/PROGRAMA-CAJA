@@ -727,6 +727,102 @@ kbd {
 /* ============ HELPERS ============ */
 .hidden { display: none !important; }
 
+/* ============ CAJA SELECTOR ============ */
+#cajaSelectorScreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+}
+
+.caja-selector-wrap {
+  background: #fff;
+  border-radius: 16px;
+  padding: 40px 36px 36px;
+  width: 100%;
+  max-width: 480px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,.3);
+}
+
+.caja-selector-wrap h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin-bottom: 6px;
+}
+
+.cajas-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 20px 0;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.caja-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  transition: background .15s, border-color .15s, box-shadow .15s;
+}
+
+.caja-item:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  box-shadow: 0 2px 8px rgba(37,99,235,.1);
+}
+
+.caja-item-name {
+  font-weight: 700;
+  font-size: 15px;
+  color: #1e3a5f;
+}
+
+.caja-item-meta {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 3px;
+}
+
+.caja-item-arrow {
+  font-size: 18px;
+  color: #93c5fd;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.no-cajas-msg {
+  color: #94a3b8;
+  font-size: 14px;
+  padding: 24px 0 10px;
+  text-align: center;
+}
+
+.caja-nombre-badge {
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(255,255,255,.2);
+  border: 1px solid rgba(255,255,255,.4);
+  padding: 4px 10px;
+  border-radius: 12px;
+  color: #fff;
+  letter-spacing: .02em;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ============ RESPONSIVE ============ */
 @media (max-width: 600px) {
   .app-header { padding: 12px 14px; }

@@ -24,6 +24,26 @@
   </div>
 </div>
 
+<!-- ===== SELECTOR DE CAJAS ===== -->
+<div id="cajaSelectorScreen" style="display:none">
+  <div class="caja-selector-wrap">
+    <div class="login-icon">💰</div>
+    <h1 style="margin-bottom:4px">Control de Caja</h1>
+    <p class="login-sub" style="margin-bottom:24px">Selecciona una caja o abre una nueva</p>
+
+    <div id="cajasLista" class="cajas-lista"></div>
+
+    <button class="btn btn-primary btn-block" id="btnNuevaCaja"
+      onclick="iniciarNuevaCaja()" style="margin-top:16px">
+      + Abrir nueva caja
+    </button>
+    <button class="btn btn-ghost btn-sm" onclick="logout()"
+      style="margin-top:10px;width:100%;color:#6b7280">
+      Cerrar sesión
+    </button>
+  </div>
+</div>
+
 <!-- ===== MAIN APP ===== -->
 <div id="mainApp">
 
@@ -31,7 +51,9 @@
     <h1>💰 Control de Caja</h1>
     <div class="header-right">
       <span id="headerDate" class="header-date"></span>
-      <span id="empleadoBadge" class="empleado-badge hidden">👤 Modo empleado</span>
+      <span id="cajaNombreDisplay" class="caja-nombre-badge hidden"></span>
+      <span id="empleadoBadge" class="empleado-badge hidden">👤 Empleado</span>
+      <button id="btnCajas" class="btn btn-ghost hidden" onclick="showCajaSelector()">⇄ Cajas</button>
       <button id="btnHistorial" class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
       <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
     </div>
@@ -46,6 +68,17 @@
         <div class="status-badge status-closed">● Caja cerrada</div>
         <h2>Apertura de Caja</h2>
         <p class="section-sub">Complete los datos para abrir la caja del día</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Nombre de la caja</h3></div>
+        <div class="card-body">
+          <div class="input-wrap">
+            <input type="text" id="cajaNombreInput" class="form-control"
+              placeholder="Ej: Turno mañana, Caja 1…" maxlength="40"
+              style="padding-left:12px">
+          </div>
+        </div>
       </div>
 
       <div class="card">
