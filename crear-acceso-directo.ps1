@@ -1,60 +1,59 @@
-# Crea icono + acceso directo del widget de Yapes en el Escritorio.
+# Configura el widget de Yapes:
+#  1. Genera yapes.ico desde el logo real de Che plaS (sin marca de agua)
+#  2. Registra el protocolo cheplas:// para abrir el widget desde la web
+#  3. Crea acceso directo en el Escritorio
 
 $scriptDir = "C:\Users\Che plas\PROGRAMA-CAJA"
-$vbsPath   = "$scriptDir\lanzar-yapes.vbs"
+$logoSrc   = "C:\Users\Che plas\OneDrive\CHE PLAST\CAJAS CHE\LOGO CAJA.png"
 $iconPath  = "$scriptDir\yapes.ico"
+$vbsPath   = "$scriptDir\lanzar-yapes.vbs"
 
-# ── Generar icono: circulo verde con Y blanca ──────────────────────────────
+# ── 1. Generar yapes.ico desde el logo real ────────────────────────────────
 Add-Type -AssemblyName System.Drawing
 
-$size = 64
-$bmp  = New-Object System.Drawing.Bitmap($size, $size)
-$g    = [System.Drawing.Graphics]::FromImage($bmp)
-$g.SmoothingMode      = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-$g.TextRenderingHint  = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+$orig = [System.Drawing.Image]::FromFile($logoSrc)
+$bmp  = New-Object System.Drawing.Bitmap($orig)
+$orig.Dispose()
 
-# Fondo transparente (ya viene en blanco por defecto, lo limpiar)
-$g.Clear([System.Drawing.Color]::Transparent)
-
-# Circulo verde
-$grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-    (New-Object System.Drawing.Rectangle(0, 0, $size, $size)),
-    [System.Drawing.Color]::FromArgb(22, 163, 74),
-    [System.Drawing.Color]::FromArgb(20, 83, 45),
-    [System.Drawing.Drawing2D.LinearGradientMode]::ForwardDiagonal
-)
-$g.FillEllipse($grad, 2, 2, $size-4, $size-4)
-
-# Borde sutil
-$pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(80, 255, 255, 255), 1.5)
-$g.DrawEllipse($pen, 3, 3, $size-6, $size-6)
-
-# Letra Y blanca centrada
-$font = New-Object System.Drawing.Font("Arial", 30, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-$sf   = New-Object System.Drawing.StringFormat
-$sf.Alignment     = [System.Drawing.StringAlignment]::Center
-$sf.LineAlignment = [System.Drawing.StringAlignment]::Center
-$g.DrawString("Y", $font, [System.Drawing.Brushes]::White,
-    [System.Drawing.RectangleF]::new(0, 2, $size, $size), $sf)
-
+# Borrar marca de agua (esquina inferior derecha, fondo negro)
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$wm = [int]($bmp.Width * 0.83)
+$hm = [int]($bmp.Height * 0.83)
+$g.FillRectangle([System.Drawing.Brushes]::Black, $wm, $hm, $bmp.Width - $wm, $bmp.Height - $hm)
 $g.Dispose()
 
-# Guardar como .ico
-$hIcon = $bmp.GetHicon()
-$icon  = [System.Drawing.Icon]::FromHandle($hIcon)
-$fs    = New-Object System.IO.FileStream($iconPath, [System.IO.FileMode]::Create)
+# Escalar a 256x256 para el .ico
+$icon256 = New-Object System.Drawing.Bitmap($bmp, 256, 256)
+$hIcon   = $icon256.GetHicon()
+$icon    = [System.Drawing.Icon]::FromHandle($hIcon)
+$fs      = New-Object System.IO.FileStream($iconPath, [System.IO.FileMode]::Create)
 $icon.Save($fs)
-$fs.Close(); $icon.Dispose(); $bmp.Dispose()
+$fs.Close()
+$icon.Dispose(); $icon256.Dispose(); $bmp.Dispose()
 
 Write-Host "Icono creado: $iconPath" -ForegroundColor Green
 
-# ── Crear acceso directo ───────────────────────────────────────────────────
+# ── 2. Registrar protocolo cheplas:// ─────────────────────────────────────
+# Esto permite que el boton de la web llame window.location.href='cheplas://yapes'
+# y lance el widget con HWND_TOPMOST sin ventana de consola.
+$cmd = "`"wscript.exe`" `"$vbsPath`" `"%1`""
+
+$base = "HKCU:\SOFTWARE\Classes\cheplas"
+New-Item -Path $base -Force | Out-Null
+Set-ItemProperty -Path $base -Name "(Default)"    -Value "URL:Che plaS Widget"
+Set-ItemProperty -Path $base -Name "URL Protocol" -Value ""
+New-Item -Path "$base\DefaultIcon" -Force | Out-Null
+Set-ItemProperty -Path "$base\DefaultIcon" -Name "(Default)" -Value $iconPath
+New-Item -Path "$base\shell\open\command" -Force | Out-Null
+Set-ItemProperty -Path "$base\shell\open\command" -Name "(Default)" -Value $cmd
+
+Write-Host "Protocolo cheplas:// registrado" -ForegroundColor Green
+
+# ── 3. Crear acceso directo en el Escritorio ───────────────────────────────
 $desktop  = [System.Environment]::GetFolderPath("Desktop")
 $shortcut = "$desktop\Yapes - Che plaS.lnk"
-
-$shell = New-Object -ComObject WScript.Shell
-$lnk   = $shell.CreateShortcut($shortcut)
-
+$shell    = New-Object -ComObject WScript.Shell
+$lnk      = $shell.CreateShortcut($shortcut)
 $lnk.TargetPath       = "wscript.exe"
 $lnk.Arguments        = "`"$vbsPath`""
 $lnk.WorkingDirectory = $scriptDir
@@ -62,6 +61,9 @@ $lnk.IconLocation     = "$iconPath,0"
 $lnk.Description      = "Widget de Yapes - Che plaS"
 $lnk.Save()
 
-Write-Host "Acceso directo creado: $shortcut" -ForegroundColor Green
+Write-Host "Acceso directo creado en el Escritorio" -ForegroundColor Green
+Write-Host ""
+Write-Host "La primera vez que uses el boton de la web," -ForegroundColor Yellow
+Write-Host "Brave preguntara si permitir 'cheplas://'. Marca 'Siempre permitir'." -ForegroundColor Yellow
 Write-Host ""
 pause

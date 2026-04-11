@@ -1,7 +1,6 @@
 $widgetPath = "file:///C:/Users/Che%20plas/PROGRAMA-CAJA/yapes-widget.html"
-$profileDir = "C:\Users\Che plas\PROGRAMA-CAJA\.widget-data"
-# Tamaño inicial: suficiente para el login (el JS lo reduce al iniciar sesion)
-$W = 300; $H = 210
+# Sin --user-data-dir: comparte sesion con el Brave principal (no pide login)
+$W = 200; $H = 90
 
 $bravePaths = @(
     "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
@@ -39,22 +38,22 @@ public class Win32 {
 }
 "@
 
-$TOPMOST    = [IntPtr](-1)
-$SWP_TOPMOST = 0u  # flag 0 = aplicar posicion + tamano + z-order
+$screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$x = $screen.Left + 10
+$y = $screen.Bottom - $H - 10
 
-# Si ya esta abierto: traer al frente y asegurar siempre-visible
+# Si ya esta abierto: traer al frente y asegurar topmost
 $existing = [Win32]::FindByTitle("Yapes")
 if ($existing -ne [IntPtr]::Zero) {
     [Win32]::ShowWindow($existing, 9)
-    [Win32]::SetWindowPos($existing, $TOPMOST, 0, 0, 0, 0, 3u)  # SWP_NOMOVE|SWP_NOSIZE
+    [Win32]::SetWindowPos($existing, [IntPtr](-1), 0, 0, 0, 0, 3u)
     [Win32]::SetForegroundWindow($existing)
     exit
 }
 
-# Lanzar Brave con perfil dedicado
-Start-Process $brave -ArgumentList "--app=`"$widgetPath`" --user-data-dir=`"$profileDir`" --window-size=$W,$H --no-first-run --no-default-browser-check"
+Start-Process $brave -ArgumentList "--app=`"$widgetPath`" --window-size=$W,$H --no-first-run"
 
-# Esperar ventana y aplicar TOPMOST (el JS maneja el tamano)
+# Esperar ventana y aplicar TOPMOST (JS maneja resize)
 $hwnd = [IntPtr]::Zero
 for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Milliseconds 300
@@ -62,6 +61,6 @@ for ($i = 0; $i -lt 30; $i++) {
     if ($hwnd -ne [IntPtr]::Zero) { break }
 }
 if ($hwnd -ne [IntPtr]::Zero) {
-    [Win32]::SetWindowPos($hwnd, $TOPMOST, 0, 0, 0, 0, 3u)
+    [Win32]::SetWindowPos($hwnd, [IntPtr](-1), $x, $y, $W, $H, 0u)
     [Win32]::SetForegroundWindow($hwnd)
 }
