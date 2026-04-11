@@ -16,20 +16,20 @@
       display: flex;
       flex-direction: column;
       font-size: 13px;
+      user-select: none;
     }
 
-    /* ── Header ── */
     .w-header {
       background: linear-gradient(135deg, #14532d 0%, #16a34a 100%);
-      padding: 6px 10px;
+      padding: 5px 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-shrink: 0;
-      height: 30px;
+      height: 28px;
     }
     .w-brand {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 900;
       font-style: italic;
       font-family: Georgia, serif;
@@ -40,18 +40,17 @@
       line-height: 1;
     }
     .w-caja-badge {
-      font-size: 10px;
+      font-size: 9px;
       font-weight: 600;
-      color: rgba(255,255,255,.85);
-      max-width: 110px;
+      color: rgba(255,255,255,.8);
+      max-width: 100px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    /* ── Input area ── */
     .w-input-area {
-      padding: 7px 8px 5px;
+      padding: 8px 8px 6px;
       background: #fff;
       border-bottom: 1px solid #e2e8f0;
       flex-shrink: 0;
@@ -105,58 +104,25 @@
     .w-btn-add:hover  { background: #15803d; }
     .w-btn-add:active { transform: scale(.92); }
 
-    /* Feedback */
     .w-feedback {
       font-size: 10px;
       color: #16a34a;
       font-weight: 600;
-      min-height: 13px;
+      min-height: 12px;
       margin-top: 3px;
       padding-left: 2px;
     }
 
-    /* ── Total bar ── */
-    .w-total-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 4px 8px;
-      background: #f0fdf4;
-      border-bottom: 1px solid #bbf7d0;
-      flex-shrink: 0;
-    }
-    .w-total-label  { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
-    .w-total-amount { font-size: 14px; font-weight: 800; color: #16a34a; }
-
-    /* ── List ── */
-    .w-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 4px 8px 6px;
-    }
-    .w-yape-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 4px 0;
-      border-bottom: 1px solid #f1f5f9;
-      font-size: 12px;
-    }
-    .w-yape-item:last-child { border-bottom: none; }
-    .w-yape-num { color: #94a3b8; font-size: 10px; margin-right: 4px; min-width: 14px; }
-    .w-yape-val { font-weight: 700; color: #14532d; }
-    .w-yape-err { color: #dc2626; font-style: italic; font-size: 10px; }
-    .w-empty    { color: #94a3b8; font-size: 11px; padding: 10px 0; text-align: center; }
-
-    /* ── Login / Status ── */
-    #loginScreen, #wStatus {
+    /* Login */
+    #loginScreen {
       flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 12px 10px;
-      gap: 7px;
+      padding: 10px 8px;
+      gap: 6px;
+      background: #fff;
     }
     .w-form-input {
       width: 100%;
@@ -182,30 +148,36 @@
       font-family: inherit;
     }
     .w-btn-primary:hover { background: #15803d; }
-    .w-sub  { font-size: 11px; color: #64748b; }
-    .w-error { color: #dc2626; font-size: 10px; text-align: center; min-height: 13px; }
-    .w-status-msg { font-size: 12px; color: #64748b; text-align: center; }
+    .w-error { color: #dc2626; font-size: 10px; text-align: center; min-height: 12px; }
+
+    /* Status / selector */
+    #wStatus {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      gap: 5px;
+      background: #fff;
+    }
+    .w-status-msg { font-size: 11px; color: #64748b; text-align: center; }
     .w-caja-btn {
       width: 100%;
-      padding: 7px 10px;
+      padding: 6px 10px;
       background: #fff;
       border: 1px solid #e2e8f0;
       border-radius: 7px;
       cursor: pointer;
       text-align: left;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       color: #14532d;
       font-family: inherit;
       transition: background .12s, border-color .12s;
     }
     .w-caja-btn:hover { background: #f0fdf4; border-color: #86efac; }
-    #wCajasList { width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-
-    /* ── Scrollbar ── */
-    .w-list::-webkit-scrollbar { width: 3px; }
-    .w-list::-webkit-scrollbar-track { background: transparent; }
-    .w-list::-webkit-scrollbar-thumb { background: #bbf7d0; border-radius: 3px; }
+    #wCajasList { width: 100%; display: flex; flex-direction: column; gap: 5px; }
   </style>
 </head>
 <body>
@@ -217,7 +189,6 @@
 
 <!-- LOGIN -->
 <div id="loginScreen" style="display:none">
-  <p class="w-sub">Ingresa tus credenciales</p>
   <input type="email"    id="wEmail" class="w-form-input" placeholder="Correo"
     onkeypress="if(event.key==='Enter') document.getElementById('wPass').focus()">
   <input type="password" id="wPass"  class="w-form-input" placeholder="Contraseña"
@@ -232,7 +203,7 @@
   <div id="wCajasList"></div>
 </div>
 
-<!-- MAIN -->
+<!-- MAIN: solo input -->
 <div id="widgetMain" style="display:none">
   <div class="w-input-area">
     <div class="w-input-row">
@@ -245,13 +216,6 @@
       <button class="w-btn-add" onclick="wAddYape()" title="Agregar (Enter)">+</button>
     </div>
     <p class="w-feedback" id="wFeedback"></p>
-  </div>
-  <div class="w-total-bar">
-    <span class="w-total-label">Total</span>
-    <span class="w-total-amount" id="wTotal">S/. 0.00</span>
-  </div>
-  <div class="w-list" id="wYapesList">
-    <p class="w-empty">Sin yapes aún</p>
   </div>
 </div>
 
@@ -275,10 +239,10 @@ const db   = firebase.firestore();
 
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
 
-let _cajaId   = null;
-let _unsub    = null;
+let _cajaId  = null;
+let _unsub   = null;
 let _yapesRaw = '';
-let _fbTimer  = null;
+let _fbTimer = null;
 
 auth.onAuthStateChanged(user => {
   if (user) { show('wStatus'); hide('loginScreen'); loadCajas(); }
@@ -302,7 +266,7 @@ async function loadCajas() {
     const cajas = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       .sort((a,b) => new Date(b.aperturaFecha||0) - new Date(a.aperturaFecha||0));
     if (!cajas.length) {
-      setStatus('⏳ Sin cajas abiertas');
+      setStatus('Sin cajas abiertas');
       document.getElementById('wCajasList').innerHTML =
         '<button class="w-caja-btn" onclick="loadCajas()">↻ Buscar</button>';
       return;
@@ -313,7 +277,7 @@ async function loadCajas() {
       `<button class="w-caja-btn" onclick="selectCaja('${c.id}','${esc(c.nombre||'Caja')}')">
         ${esc(c.nombre || 'Sin nombre')}
        </button>`).join('');
-  } catch(e) { setStatus('Error al cargar'); console.error(e); }
+  } catch(e) { setStatus('Error'); console.error(e); }
 }
 
 function selectCaja(id, nombre) {
@@ -324,55 +288,32 @@ function selectCaja(id, nombre) {
     if (!snap.exists) {
       _cajaId = null;
       hide('widgetMain'); show('wStatus');
-      setStatus('⚠️ Caja cerrada');
+      setStatus('Caja cerrada');
       document.getElementById('wCajasList').innerHTML =
         '<button class="w-caja-btn" onclick="loadCajas()">↻ Buscar otra</button>';
       return;
     }
     _yapesRaw = snap.data().yapesRaw || '';
-    renderYapes();
   }, e => console.warn(e));
   hide('wStatus'); show('widgetMain');
   setTimeout(() => document.getElementById('wYapeInput').focus(), 50);
-}
-
-function renderYapes() {
-  const lines = _yapesRaw.split('\n').map(l => l.trim()).filter(Boolean);
-  let total = 0, html = '';
-  lines.forEach((line, i) => {
-    const val = parseFloat(line);
-    if (!isNaN(val) && val > 0) {
-      total += val;
-      html += `<div class="w-yape-item">
-        <span><span class="w-yape-num">${i+1}.</span>
-        <span class="w-yape-val">S/. ${val.toFixed(2)}</span></span>
-      </div>`;
-    } else {
-      html += `<div class="w-yape-item">
-        <span><span class="w-yape-num">${i+1}.</span>
-        <span class="w-yape-err">${esc(line)}</span></span>
-      </div>`;
-    }
-  });
-  const list = document.getElementById('wYapesList');
-  list.innerHTML = html || '<p class="w-empty">Sin yapes aún</p>';
-  document.getElementById('wTotal').textContent = 'S/. ' + total.toFixed(2);
-  list.scrollTop = list.scrollHeight;
 }
 
 async function wAddYape() {
   const input = document.getElementById('wYapeInput');
   const val   = parseFloat(input.value);
   if (!val || val <= 0 || !_cajaId) { input.select(); return; }
-  const newRaw  = _yapesRaw ? _yapesRaw + '\n' + val.toFixed(2) : val.toFixed(2);
-  input.value   = '';
+  const newRaw = _yapesRaw ? _yapesRaw + '\n' + val.toFixed(2) : val.toFixed(2);
+  input.value  = '';
   input.focus();
   const fb = document.getElementById('wFeedback');
   fb.textContent = `✓ S/. ${val.toFixed(2)}`;
   clearTimeout(_fbTimer);
   _fbTimer = setTimeout(() => { fb.textContent = ''; }, 1800);
-  try { await db.doc(`cajas/${_cajaId}`).update({ yapesRaw: newRaw, _ts: Date.now() }); }
-  catch(e) { console.error(e); }
+  try {
+    _yapesRaw = newRaw;
+    await db.doc(`cajas/${_cajaId}`).update({ yapesRaw: newRaw, _ts: Date.now() });
+  } catch(e) { console.error(e); }
 }
 
 function show(id) { document.getElementById(id).style.display = 'flex'; }
