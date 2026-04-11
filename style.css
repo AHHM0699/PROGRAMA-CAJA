@@ -651,7 +651,9 @@ kbd {
 
 .evento-info { flex: 1; }
 .evento-desc { font-size: 13px; color: #374151; }
-.evento-monto { font-size: 15px; font-weight: 700; margin-top: 1px; }
+.evento-nota { font-size: 13px; color: #374151; margin-bottom: 2px; }
+.evento-monto { font-size: 15px; font-weight: 700; margin-top: 1px; display: flex; align-items: center; gap: 8px; }
+.evento-hora { font-size: 11px; font-weight: 400; color: #94a3b8; }
 .ev-monto-egr { color: #dc2626; }
 .ev-monto-ing { color: #059669; }
 
@@ -722,6 +724,40 @@ kbd {
 @keyframes slideUp {
   from { transform: translateY(20px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ============ CIERRE CONFIRM MODAL ============ */
+.cierre-confirm-grid {
+  background: #f8fafc;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 14px;
+}
+
+.cc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.cc-row:last-child { border-bottom: none; }
+.cc-row-diff { background: #f0fdf4; }
+
+.cc-label { font-size: 13px; font-weight: 600; color: #64748b; }
+.cc-val { font-size: 18px; font-weight: 700; color: #14532d; }
+.cc-diff-val { font-size: 20px; }
+
+.cc-warning {
+  padding: 10px 14px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #9a3412;
+  margin-bottom: 4px;
 }
 
 /* ============ BRAND LOGO ============ */

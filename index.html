@@ -282,8 +282,9 @@
         </div>
       </div>
 
-      <div class="form-actions">
-        <button class="btn btn-success btn-lg" onclick="cerrarCaja()">📄 Cerrar Caja y Generar PDF</button>
+      <div class="form-actions" style="gap:10px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-lg" onclick="generarArqueo()">📊 Arqueo parcial</button>
+        <button class="btn btn-success btn-lg" onclick="confirmarCierre()">📄 Cerrar Caja</button>
       </div>
     </div><!-- /viewCierre -->
 
@@ -440,8 +441,8 @@
             <button class="tgl"        id="tglSubYape"     onclick="setEventoSubtipo('Yape')">Yape</button>
           </div>
         </div>
-        <label class="field-label">Descripción</label>
-        <input type="text" id="evDesc" class="form-control" placeholder="Ej: Pago proveedor" style="margin-bottom:14px">
+        <label class="field-label">Nota / concepto <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
+        <input type="text" id="evDesc" class="form-control" placeholder="Ej: Pago proveedor Coca-Cola, retiro dueño…" style="margin-bottom:14px">
         <label class="field-label">Monto (S/.)</label>
         <div class="input-wrap">
           <span class="prefix">S/.</span>
@@ -483,6 +484,38 @@
   </div>
 </div>
 
+
+<!-- ===== MODAL: CONFIRMAR CIERRE ===== -->
+<div id="cierreConfirmModal" class="modal-overlay hidden" onclick="if(event.target===this) closeCierreConfirm()">
+  <div class="modal-box" style="max-width:420px">
+    <div class="modal-head">
+      <h3>📄 Confirmar cierre de caja</h3>
+      <button class="btn-close" onclick="closeCierreConfirm()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc">Revisa el resumen antes de cerrar. <strong>Esta acción no se puede deshacer.</strong></p>
+      <div class="cierre-confirm-grid">
+        <div class="cc-row">
+          <span class="cc-label">Efectivo esperado</span>
+          <span class="cc-val" id="ccEsperado">S/. 0.00</span>
+        </div>
+        <div class="cc-row">
+          <span class="cc-label">Efectivo real</span>
+          <span class="cc-val" id="ccReal">S/. 0.00</span>
+        </div>
+        <div class="cc-row cc-row-diff">
+          <span class="cc-label">Diferencia</span>
+          <span class="cc-val cc-diff-val" id="ccDiff">S/. 0.00</span>
+        </div>
+      </div>
+      <p id="ccWarning" class="cc-warning hidden">⚠️ Hay una diferencia importante. ¿Estás seguro?</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeCierreConfirm()">Cancelar</button>
+      <button class="btn btn-success" onclick="cerrarCaja()">Confirmar y generar PDF</button>
+    </div>
+  </div>
+</div>
 
 <!-- Inactivity warning (desactivado, se mantiene en DOM por compatibilidad) -->
 <div id="inactivityWarning" class="inactivity-warning hidden">

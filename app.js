@@ -849,7 +849,54 @@ function calcularDiferencia() {
 // ============================================================
 //  CLOSE CASH & GENERATE PDF
 // ============================================================
+function confirmarCierre() {
+  const esperado  = getEsperado();
+  const real      = getCajaFinal();
+  const diferencia = round2(real - esperado);
+
+  document.getElementById('ccEsperado').textContent = fmt(esperado);
+  document.getElementById('ccReal').textContent     = fmt(real);
+
+  const ccDiff    = document.getElementById('ccDiff');
+  const ccWarning = document.getElementById('ccWarning');
+  ccDiff.textContent = (diferencia >= 0 ? '+' : '') + fmt(diferencia);
+  ccDiff.className   = 'cc-val cc-diff-val ' + (diferencia > 0 ? 'diff-pos' : diferencia < 0 ? 'diff-neg' : 'diff-zero');
+
+  const limite = 20;
+  ccWarning.classList.toggle('hidden', Math.abs(diferencia) <= limite);
+
+  document.getElementById('cierreConfirmModal').classList.remove('hidden');
+}
+
+function closeCierreConfirm() {
+  document.getElementById('cierreConfirmModal').classList.add('hidden');
+}
+
+async function generarArqueo() {
+  const ventasFinal      = parseFloat(document.getElementById('ventasFinal').value) || 0;
+  const totalYapes       = getTotalYapes();
+  const yapesList        = getYapesList();
+  const efectivoReal     = getCajaFinal();
+  const efectivoEsperado = getEsperado();
+  const diferencia       = round2(efectivoReal - efectivoEsperado);
+
+  const report = {
+    arqueo: true,
+    fecha: new Date().toISOString(), cajaId: currentCajaId, cajaNombre: currentCajaNombre || '',
+    cajaInicial: state.cajaInicial, ventasHastaAhora: state.ventasHastaAhora,
+    ultimoYape: state.ultimoYape, aperturaFecha: state.aperturaFecha,
+    inicialMode: state.inicialMode, inicialBreakdown: state.inicialBreakdown || null,
+    ventasFinal, totalYapes, yapesList, yapesRaw: state.yapesRaw,
+    eventos: state.eventos || [], cierreMode,
+    cierreBreakdown: cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
+    efectivoEsperado, efectivoReal, diferencia,
+  };
+
+  await generarPDF(report);
+}
+
 async function cerrarCaja() {
+  closeCierreConfirm();
   const ventasFinal      = parseFloat(document.getElementById('ventasFinal').value) || 0;
   const totalYapes       = getTotalYapes();
   const yapesList        = getYapesList();
@@ -1064,8 +1111,9 @@ function addEvento() {
     id: Date.now(), tipo: currentEventoTipo,
     subtipo: currentEventoTipo === 'Ingreso' ? currentEventoSubtipo : null,
     desc, monto,
-    usd: currentEventoTipo === 'Divisa' ? usd : null,
-    tc:  currentEventoTipo === 'Divisa' ? tc  : null,
+    usd:   currentEventoTipo === 'Divisa' ? usd : null,
+    tc:    currentEventoTipo === 'Divisa' ? tc  : null,
+    fecha: new Date().toISOString(),
   });
   saveState(); renderEventos(); calcularEsperado(); closeEventosModal();
 }
@@ -1110,11 +1158,16 @@ function _renderEventosInto(cardId, listId) {
     const sign       = (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? '−' : '+';
     const divisaNote = e.tipo === 'Divisa'
       ? `<span style="font-size:11px;color:#64748b"> ($${(+e.usd).toFixed(2)} × ${e.tc})</span>` : '';
+    const horaStr = e.fecha
+      ? new Date(e.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' }) : '';
+    const notaHtml = e.desc
+      ? `<div class="evento-nota">${escHtml(e.desc)}${divisaNote}</div>`
+      : divisaNote ? `<div class="evento-nota">${divisaNote}</div>` : '';
     return `<div class="evento-item">
       <span class="evento-badge ${badgeClass}">${badgeLabel}</span>
       <div class="evento-info">
-        <div class="evento-desc">${escHtml(e.desc || '—')}${divisaNote}</div>
-        <div class="evento-monto ${montoClass}">${sign} ${fmt(e.monto)}</div>
+        ${notaHtml}
+        <div class="evento-monto ${montoClass}">${sign} ${fmt(e.monto)}${horaStr ? `<span class="evento-hora">${horaStr}</span>` : ''}</div>
       </div>
       <button class="btn-ev-del" onclick="eliminarEvento(${i})" title="Eliminar">✕</button>
     </div>`;
@@ -1145,9 +1198,11 @@ async function generarPDF(d) {
     if (y + needed > ph - 22) { doc.addPage(); return mg; } return y;
   }
 
-  doc.setFillColor(...BLUE); doc.rect(0, 0, pw, 32, 'F');
+  const GREEN_DARK = [20,83,45];
+  const headerColor = d.arqueo ? [30,58,95] : GREEN_DARK;
+  doc.setFillColor(...headerColor); doc.rect(0, 0, pw, 32, 'F');
   doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(16);
-  doc.text('REPORTE DE CIERRE DE CAJA', pw/2, 14, { align:'center' });
+  doc.text(d.arqueo ? 'ARQUEO PARCIAL DE CAJA' : 'REPORTE DE CIERRE DE CAJA', pw/2, 14, { align:'center' });
   doc.setFont('helvetica','normal'); doc.setFontSize(9);
   const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
   doc.text(`${new Date(d.fecha).toLocaleDateString('es-PE',opts)}  |  ${new Date(d.fecha).toLocaleTimeString('es-PE')}`, pw/2, 22, { align:'center' });
@@ -1253,7 +1308,9 @@ async function generarPDF(d) {
   doc.text('Reporte generado por Control de Caja',pw/2,ph-8,{align:'center'});
   doc.text(new Date(d.fecha).toLocaleString('es-PE'),pw/2,ph-4,{align:'center'});
 
-  doc.save(`Cierre_${(d.cajaNombre||'Caja').replace(/\s+/g,'_')}_${new Date(d.fecha).toLocaleDateString('es-PE').replace(/\//g,'-')}.pdf`);
+  const prefix = d.arqueo ? 'Arqueo' : 'Cierre';
+  const hora   = new Date(d.fecha).toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}).replace(':','-');
+  doc.save(`${prefix}_${(d.cajaNombre||'Caja').replace(/\s+/g,'_')}_${new Date(d.fecha).toLocaleDateString('es-PE').replace(/\//g,'-')}_${hora}.pdf`);
 }
 
 function pdfSec(doc,title,y,pw,mg,BLUE,LBLUE){
