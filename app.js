@@ -1,12 +1,56 @@
 'use strict';
 
 // ============================================================
+//  FIREBASE CONFIG
+//  1. Ve a console.firebase.google.com y crea un proyecto
+//  2. Activa Firestore Database (modo prueba) y Authentication > Correo/Contraseña
+//  3. Crea tus usuarios en Authentication > Usuarios
+//  4. Reemplaza los valores de abajo con tu configuración
+//     (Configuración del proyecto ⚙️ → Tu app web → firebaseConfig)
+//  5. Para asignar roles: en Firestore crea la colección "usuarios",
+//     un documento por usuario con id = UID del usuario y campo:
+//       role: "admin"   ← para el administrador
+//       role: "employee" ← para el empleado
+// ============================================================
+const firebaseConfig = {
+  apiKey:            'TU_API_KEY',
+  authDomain:        'TU_PROYECTO.firebaseapp.com',
+  projectId:         'TU_PROYECTO_ID',
+  storageBucket:     'TU_PROYECTO.appspot.com',
+  messagingSenderId: 'TU_SENDER_ID',
+  appId:             'TU_APP_ID',
+};
+
+// ============================================================
+//  FIREBASE INIT
+// ============================================================
+if (!firebaseConfig.projectId || firebaseConfig.projectId === 'TU_PROYECTO_ID') {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('loginScreen').innerHTML = `
+      <div class="login-box">
+        <div class="login-icon">⚙️</div>
+        <h1>Configuración pendiente</h1>
+        <p class="login-sub" style="margin-top:12px">
+          Edita <strong>app.js</strong> y reemplaza los valores de
+          <code>firebaseConfig</code> con tu configuración de Firebase.<br><br>
+          Lee los comentarios al inicio del archivo para más instrucciones.
+        </p>
+      </div>`;
+  });
+  throw new Error('Firebase config not set — edit firebaseConfig in app.js');
+}
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db   = firebase.firestore();
+
+// Refs
+const estadoRef   = db.doc('estado/actual');
+const historialCol = db.collection('historial');
+
+// ============================================================
 //  CONSTANTS
 // ============================================================
-// Password stored as SHA-256 hash — the plain text never appears in this file.
-const PASSWORD_HASH  = '2d4e7db060a92769c58c1c355d5207537ac741e43baf27712025bbb371198d5d';
-const EMPLOYEE_HASH  = 'b3cfbb5c6ea591e6b21fe9720e24257bd25f2c8025a591cda2ac548ac4e3c9a9';
-
 const DENOMS = [
   { label: 'S/. 0.10', val: 0.10, tipo: 'Moneda' },
   { label: 'S/. 0.20', val: 0.20, tipo: 'Moneda' },
@@ -21,6 +65,13 @@ const DENOMS = [
   { label: 'S/. 200',  val: 200,  tipo: 'Billete' },
 ];
 
+// Whitelist de campos que se persisten en Firestore
+const STATE_FIELDS = [
+  'cajaAbierta', 'cajaInicial', 'ventasHastaAhora', 'ultimoYape',
+  'aperturaFecha', 'inicialMode', 'inicialBreakdown',
+  'eventos', 'yapesRaw', 'lastDenomQtys', '_ts',
+];
+
 // ============================================================
 //  STATE
 // ============================================================
@@ -33,22 +84,19 @@ let state = {
   inicialMode:      'monto',
   inicialBreakdown: null,
   eventos:          [],
-  yapesRaw:         '',  // textarea content — synced so employee edits reach admin
-  _ts:              0,   // unix ms — used for multi-device conflict resolution
+  yapesRaw:         '',
+  lastDenomQtys:    null,   // cantidades del último cierre → prefill siguiente apertura
+  _ts:              0,
 };
 
-let cierreMode = 'denom'; // denomination is default for closing
-
-let currentEventoTipo    = 'Egreso';
-let currentEventoSubtipo = 'Efectivo';
-let userRole             = 'admin'; // 'admin' | 'employee'
-
-// Inactivity timer
-let _inactivityTimer   = null;
-let _warningTimer      = null;
-let _countdownInterval = null;
-const INACTIVITY_MS    = 15 * 60 * 1000; // 15 minutes
-const WARNING_AHEAD_MS =      60 * 1000; // show warning 1 min before
+let cierreMode           = 'denom';
+let userRole             = 'admin';  // 'admin' | 'employee'
+let _pipWindow           = null;
+let _unsubscribeSync     = null;
+let _estadoPushTimer     = null;
+let _inactivityTimer     = null;
+let _warningTimer        = null;
+let _countdownInterval   = null;
 
 // ============================================================
 //  INIT
@@ -56,40 +104,87 @@ const WARNING_AHEAD_MS =      60 * 1000; // show warning 1 min before
 window.addEventListener('DOMContentLoaded', () => {
   buildDenomTable('inicial', 'inicialDenomTable');
   buildDenomTable('cierre',  'cierreDenomTable');
-  prefillInicialDenoms();
 
-  const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
+  const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
   document.getElementById('headerDate').textContent =
     new Date().toLocaleDateString('es-PE', opts);
 
-  document.getElementById('passInput').focus();
+  // Firebase manages session — this fires immediately on load if session exists
+  auth.onAuthStateChanged(async (user) => {
+    if (user) {
+      await _initSession(user);
+    } else {
+      _showLoginScreen();
+    }
+  });
 });
+
+async function _initSession(user) {
+  // Determine role from Firestore usuarios/{uid}
+  try {
+    const snap = await db.doc(`usuarios/${user.uid}`).get();
+    userRole = snap.exists ? (snap.data().role || 'employee') : 'admin';
+  } catch (e) {
+    userRole = 'admin';
+  }
+
+  // Load current state from Firestore
+  await _loadStateFromFirestore();
+
+  // Start real-time listener
+  startRealtimeSync();
+
+  _applyRoleUI();
+  showView('auto');
+}
+
+function _showLoginScreen() {
+  stopRealtimeSync();
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('mainApp').style.display     = 'none';
+  document.getElementById('emailInput').focus();
+  state = {
+    cajaAbierta: false, cajaInicial: 0, ventasHastaAhora: 0,
+    ultimoYape: 0, aperturaFecha: null, inicialMode: 'monto', inicialBreakdown: null,
+    eventos: [], yapesRaw: '', lastDenomQtys: null, _ts: 0,
+  };
+}
 
 // ============================================================
 //  AUTH
 // ============================================================
 async function login() {
-  const input = document.getElementById('passInput');
-  const hash  = await sha256(input.value);
+  const email = document.getElementById('emailInput').value.trim();
+  const pass  = document.getElementById('passInput').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
 
-  if (hash === PASSWORD_HASH || hash === EMPLOYEE_HASH) {
-    userRole = (hash === EMPLOYEE_HASH) ? 'employee' : 'admin';
-    input.value = '';
+  if (!email || !pass) {
+    errEl.textContent = 'Ingresa tu correo y contraseña.';
+    return;
+  }
+
+  try {
+    await auth.signInWithEmailAndPassword(email, pass);
+    document.getElementById('passInput').value  = '';
+    document.getElementById('emailInput').value = '';
     document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('mainApp').style.display    = 'block';
-    document.getElementById('loginError').style.display = 'none';
-    _applyRoleUI();
-    loadState();
-    await pullEstadoFromSheets();   // sync live state from Sheets if available
-    showView('auto');
-    startInactivityTimer();
-    startSyncPolling();             // background poll every 30 s
-  } else {
-    document.getElementById('loginError').style.display = 'block';
-    input.value = '';
+    document.getElementById('mainApp').style.display     = 'block';
+    // onAuthStateChanged handles the rest
+  } catch (e) {
+    document.getElementById('passInput').value = '';
+    const msgs = {
+      'auth/user-not-found':    'Usuario no encontrado.',
+      'auth/wrong-password':    'Contraseña incorrecta.',
+      'auth/invalid-email':     'Correo inválido.',
+      'auth/invalid-credential':'Correo o contraseña incorrectos.',
+      'auth/too-many-requests': 'Demasiados intentos. Intenta más tarde.',
+    };
+    errEl.textContent = msgs[e.code] || 'Error al iniciar sesión.';
+    const input = document.getElementById('passInput');
     input.classList.add('shake');
     input.addEventListener('animationend', () => input.classList.remove('shake'), { once: true });
-    input.focus();
+    document.getElementById('emailInput').focus();
   }
 }
 
@@ -97,23 +192,19 @@ function _applyRoleUI() {
   const isEmp = userRole === 'employee';
   document.getElementById('empleadoBadge').classList.toggle('hidden', !isEmp);
   document.getElementById('btnHistorial').style.display = isEmp ? 'none' : '';
-  document.getElementById('btnConfig').style.display    = isEmp ? 'none' : '';
 }
 
-function logout() {
-  stopInactivityTimer();
-  stopSyncPolling();
+async function logout() {
+  stopRealtimeSync();
   if (_pipWindow && !_pipWindow.closed) _pipWindow.close();
   _pipWindow = null;
   userRole = 'admin';
-  document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('mainApp').style.display     = 'none';
-  document.getElementById('passInput').value = '';
-  document.getElementById('inactivityWarning').classList.add('hidden');
+  await auth.signOut();
+  // onAuthStateChanged fires → _showLoginScreen()
 }
 
 // ============================================================
-//  VIEWS  (apertura | cierre | reportes | auto)
+//  VIEWS
 // ============================================================
 function showView(view) {
   if (userRole === 'employee') { _showEmployeeView(); return; }
@@ -127,6 +218,7 @@ function showView(view) {
   const cap = view.charAt(0).toUpperCase() + view.slice(1);
   document.getElementById('view' + cap).classList.remove('hidden');
 
+  if (view === 'apertura') prefillInicialDenoms();
   if (view === 'cierre')   { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); }
   if (view === 'reportes') renderReportes();
 }
@@ -142,7 +234,6 @@ function _showEmployeeView() {
   document.getElementById('empCajaAbierta').classList.toggle('hidden', !open);
 
   if (open) {
-    // Render apertura summary
     const fechaStr = state.aperturaFecha
       ? escHtml(new Date(state.aperturaFecha).toLocaleString('es-PE')) : 'N/A';
     document.getElementById('empResumenGrid').innerHTML = `
@@ -190,7 +281,20 @@ function _renderEmpYapesList() {
      </div>`;
 }
 
-// Sync state.yapesRaw → admin yapesInput textarea
+function refreshCurrentView() {
+  const views = {
+    viewCierre:   () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
+    viewEmpleado: () => _showEmployeeView(),
+    viewApertura: () => prefillInicialDenoms(),
+  };
+  for (const [id, fn] of Object.entries(views)) {
+    if (!document.getElementById(id)?.classList.contains('hidden')) { fn(); break; }
+  }
+}
+
+// ============================================================
+//  DOM SYNC HELPERS
+// ============================================================
 function _syncYapesToDom() {
   const el = document.getElementById('yapesInput');
   if (el && el.value !== state.yapesRaw) {
@@ -199,13 +303,11 @@ function _syncYapesToDom() {
   }
 }
 
-// Resolves an element from main doc or the active PiP window
 function _el(id) {
   return document.getElementById(id) ||
     (_pipWindow && !_pipWindow.closed && _pipWindow.document.getElementById(id));
 }
 
-// Employee appends a single amount — never sees existing values
 function addEmpYape() {
   const input    = _el('empYapeInput');
   const feedback = _el('empYapeFeedback');
@@ -215,7 +317,6 @@ function addEmpYape() {
 
   state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') + v.toFixed(2);
 
-  // Keep admin textarea in sync if on same device
   const adminEl = document.getElementById('yapesInput');
   if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
 
@@ -233,14 +334,11 @@ function addEmpYape() {
 // ============================================================
 //  PICTURE-IN-PICTURE YAPE WIDGET
 // ============================================================
-let _pipWindow = null;
-
 async function openYapeWidget() {
   if (!('documentPictureInPicture' in window)) {
     alert('Tu versión de Brave/Chrome no soporta esta función (requiere v116+).');
     return;
   }
-  // If already open, focus it
   if (_pipWindow && !_pipWindow.closed) { _pipWindow.focus(); return; }
 
   const placeholder = document.getElementById('empYapePipPlaceholder');
@@ -252,8 +350,6 @@ async function openYapeWidget() {
 
   const D = _pipWindow.document;
   const style = D.createElement('style');
-  // Content fills whatever size the browser gives (browser has a minimum ~200px wide)
-  // On fade: background becomes transparent so the OS desktop shows through the content area
   style.textContent = `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -311,14 +407,13 @@ async function openYapeWidget() {
   D.getElementById('pb').addEventListener('click', pipAdd);
   pipInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pipAdd(); } });
 
-  // After 15s inactive: content area becomes transparent (shows through to OS desktop)
   let _fadeTimer = null;
   function resetFade() {
     clearTimeout(_fadeTimer);
     D.documentElement.classList.remove('faded');
     _fadeTimer = setTimeout(() => D.documentElement.classList.add('faded'), 15000);
   }
-  ['mousemove','mousedown','keydown','touchstart'].forEach(ev =>
+  ['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach(ev =>
     D.addEventListener(ev, resetFade, { passive: true })
   );
   resetFade();
@@ -380,102 +475,76 @@ const XLSX_URL  = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.mini.
 const XLSX_SRI  = 'sha512-NDQhXrK2pOCL18FV5/Nc+ya9Vz+7o8dJV1IGRwuuYuRMFhAR0allmjWdZCSHFLDYgMvXKyN2jXlSy2JJEmq+ZA==';
 
 // ============================================================
-//  STATE PERSISTENCE  (local + Google Sheets live sync)
+//  STATE — FIRESTORE PERSISTENCE + REAL-TIME SYNC
 // ============================================================
 
-// Allowed fields — whitelist protects against prototype pollution
-const STATE_FIELDS = [
-  'cajaAbierta','cajaInicial','ventasHastaAhora','ultimoYape',
-  'aperturaFecha','inicialMode','inicialBreakdown','eventos','yapesRaw','_ts',
-];
-
-// Write to localStorage only (no Sheets push)
-function saveStateLocal() {
-  try { localStorage.setItem('cajaState', JSON.stringify(state)); } catch (e) {}
+// Serializa solo los campos permitidos para Firestore
+function _stateToDoc() {
+  const doc = {};
+  STATE_FIELDS.forEach(k => { doc[k] = state[k] !== undefined ? state[k] : null; });
+  return doc;
 }
 
-// Debounced Sheets push timer
-let _estadoPushTimer = null;
+// Escritura inmediata a Firestore (para apertura/cierre)
+function saveStateNow() {
+  clearTimeout(_estadoPushTimer);
+  state._ts = Date.now();
+  estadoRef.set(_stateToDoc()).catch(e => console.warn('saveStateNow error:', e));
+}
 
-// Full save: localStorage + debounced push to Sheets
+// Escritura debounced (para cambios frecuentes como yapes y eventos)
 function saveState() {
   state._ts = Date.now();
-  saveStateLocal();
   clearTimeout(_estadoPushTimer);
-  _estadoPushTimer = setTimeout(_doPushEstado, 1500); // batch rapid changes
+  _estadoPushTimer = setTimeout(() => {
+    estadoRef.set(_stateToDoc()).catch(e => console.warn('saveState error:', e));
+  }, 1200);
 }
 
-// Save live state via GET — POST with no-cors loses body on Apps Script's 302 redirect;
-// GET requests reach Apps Script reliably and already have CORS headers.
-function _doPushEstado() {
-  const url = localStorage.getItem('sheetsUrl');
-  if (!url || !isValidSheetsUrl(url)) return;
-  const params = new URLSearchParams({
-    action: 'saveEstado',
-    ts:     String(state._ts),
-    estado: JSON.stringify(state),
-  });
-  fetch(`${url}?${params.toString()}`).catch(() => {});
-}
-
-// Pull live state from Sheets on login; returns true if remote was newer
-async function pullEstadoFromSheets() {
-  const url = localStorage.getItem('sheetsUrl');
-  if (!url || !isValidSheetsUrl(url)) return false;
+async function _loadStateFromFirestore() {
   try {
-    const res  = await fetch(`${url}?action=getEstado`);
-    const data = await res.json();
-    if (data.ok && data.estado) {
-      const remote = tryParseJSON(data.estado, null);
-      if (remote && typeof remote === 'object' && !Array.isArray(remote)
-          && (remote._ts || 0) > (state._ts || 0)) {
-        _applyRemoteState(remote);
-        return true;
-      }
-    }
-  } catch (e) {}
-  return false;
+    const snap = await estadoRef.get();
+    if (snap.exists) _applyRemoteState(snap.data());
+  } catch (e) {
+    console.warn('Error cargando estado:', e);
+  }
 }
 
-// Apply a remote state object (whitelist, restore form inputs)
 function _applyRemoteState(remote) {
   STATE_FIELDS.forEach(k => {
     if (Object.prototype.hasOwnProperty.call(remote, k)) state[k] = remote[k];
   });
-  if (!Array.isArray(state.eventos)) state.eventos = [];
+  if (!Array.isArray(state.eventos))    state.eventos = [];
   if (typeof state.yapesRaw !== 'string') state.yapesRaw = '';
-  saveStateLocal();
+  if (!Array.isArray(state.lastDenomQtys)) state.lastDenomQtys = null;
+
+  // Sincronizar inputs del formulario si la caja está abierta
   if (state.cajaAbierta) {
     setMode('inicial', state.inicialMode || 'monto');
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
     set('cajaInicialExacto', state.cajaInicial      || 0);
     set('ventasHastaAhora',  state.ventasHastaAhora || 0);
     set('ultimoYape',        state.ultimoYape        || 0);
-    set('yapesInput', state.yapesRaw);
+    set('yapesInput',        state.yapesRaw);
   }
 }
 
-// Background polling — detects changes made on another device
-let _syncPollInterval = null;
-function startSyncPolling() {
-  stopSyncPolling();
-  _syncPollInterval = setInterval(async () => {
-    const synced = await pullEstadoFromSheets();
-    if (synced) {
-      showSyncToast('🔄 Sincronizado desde otro dispositivo');
-      // Refresh the currently visible view
-      const views = { viewCierre: () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
-                      viewEmpleado: () => _showEmployeeView() };
-      for (const [id, fn] of Object.entries(views)) {
-        if (!document.getElementById(id).classList.contains('hidden')) { fn(); break; }
-      }
-    }
-  }, 30000); // every 30 seconds
+// Escucha cambios en tiempo real desde otros dispositivos
+function startRealtimeSync() {
+  if (_unsubscribeSync) _unsubscribeSync();
+  _unsubscribeSync = estadoRef.onSnapshot(snap => {
+    if (!snap.exists) return;
+    const remote = snap.data();
+    // Solo aplicar si es más nuevo que nuestro estado local
+    if ((remote._ts || 0) <= (state._ts || 0)) return;
+    _applyRemoteState(remote);
+    showSyncToast('🔄 Sincronizado desde otro dispositivo');
+    refreshCurrentView();
+  }, err => console.warn('Sync listener error:', err));
 }
 
-function stopSyncPolling() {
-  clearInterval(_syncPollInterval);
-  _syncPollInterval = null;
+function stopRealtimeSync() {
+  if (_unsubscribeSync) { _unsubscribeSync(); _unsubscribeSync = null; }
 }
 
 function showSyncToast(msg) {
@@ -484,23 +553,6 @@ function showSyncToast(msg) {
   el.textContent = msg;
   el.classList.remove('hidden');
   setTimeout(() => el.classList.add('hidden'), 3500);
-}
-
-function loadState() {
-  try {
-    const raw = localStorage.getItem('cajaState');
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
-    STATE_FIELDS.forEach(k => { if (Object.prototype.hasOwnProperty.call(saved, k)) state[k] = saved[k]; });
-    if (!Array.isArray(state.eventos)) state.eventos = [];
-    if (state.cajaAbierta) {
-      setMode('inicial', state.inicialMode || 'monto');
-      document.getElementById('cajaInicialExacto').value = state.cajaInicial      || 0;
-      document.getElementById('ventasHastaAhora').value  = state.ventasHastaAhora || 0;
-      document.getElementById('ultimoYape').value        = state.ultimoYape        || 0;
-    }
-  } catch (e) {}
 }
 
 // ============================================================
@@ -578,15 +630,13 @@ function getTotalUSD() {
 }
 
 function getEventosEgresos() {
-  return round2((state.eventos || []).reduce((sum, e) => {
-    return (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? sum + e.monto : sum;
-  }, 0));
+  return round2((state.eventos || []).reduce((sum, e) =>
+    (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? sum + e.monto : sum, 0));
 }
 
 function getEventosIngresos() {
-  return round2((state.eventos || []).reduce((sum, e) => {
-    return (e.tipo === 'Ingreso' && e.subtipo === 'Efectivo') ? sum + e.monto : sum;
-  }, 0));
+  return round2((state.eventos || []).reduce((sum, e) =>
+    (e.tipo === 'Ingreso' && e.subtipo === 'Efectivo') ? sum + e.monto : sum, 0));
 }
 
 function getEsperado() {
@@ -609,7 +659,9 @@ function guardarApertura() {
   state.cajaAbierta      = true;
   state.aperturaFecha    = new Date().toISOString();
   state.inicialBreakdown = state.inicialMode === 'denom' ? getDenomBreakdown('inicial') : null;
-  saveState();
+  state.yapesRaw         = '';
+  state.eventos          = [];
+  saveStateNow();  // inmediato para que el empleado vea la apertura al instante
   showView('cierre');
 }
 
@@ -633,6 +685,17 @@ function renderResumen() {
       <div class="info-label">Apertura</div>
       <div class="info-val" style="font-size:12px;line-height:1.4">${fechaStr}</div>
     </div>`;
+}
+
+// Prefill denominaciones de apertura con cantidades del último cierre
+function prefillInicialDenoms() {
+  const saved = state.lastDenomQtys;
+  if (!Array.isArray(saved)) return;
+  saved.forEach((qty, i) => {
+    if (!qty) return;
+    const input = document.getElementById(`inicialQty${i}`);
+    if (input) { input.value = qty; onDenomInput('inicial', i); }
+  });
 }
 
 // ============================================================
@@ -758,26 +821,18 @@ async function cerrarCaja() {
   const efectivoEsperado = getEsperado();
   const diferencia       = round2(efectivoReal - efectivoEsperado);
 
-  // Save cierre denomination counts for next apertura prefill
-  if (cierreMode === 'denom') {
-    const lastDenoms = DENOMS.map((_, i) =>
-      parseFloat(document.getElementById(`cierreQty${i}`)?.value) || 0
-    );
-    try { localStorage.setItem('lastCierreDenoms', JSON.stringify(lastDenoms)); } catch (e) {}
-  }
-
   const report = {
-    id:               Date.now(),
     fecha:            new Date().toISOString(),
     cajaInicial:      state.cajaInicial,
     ventasHastaAhora: state.ventasHastaAhora,
     ultimoYape:       state.ultimoYape,
     aperturaFecha:    state.aperturaFecha,
     inicialMode:      state.inicialMode,
-    inicialBreakdown: state.inicialBreakdown,
+    inicialBreakdown: state.inicialBreakdown || null,
     ventasFinal,
     totalYapes,
     yapesList,
+    yapesRaw:         state.yapesRaw,
     eventos:          state.eventos || [],
     cierreMode,
     cierreBreakdown:  cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
@@ -786,27 +841,31 @@ async function cerrarCaja() {
     diferencia,
   };
 
-  saveReport(report);
+  await saveReport(report);
   await generarPDF(report);
-  resetAfterClose();
+  resetAfterClose(cierreMode === 'denom');
 }
 
-function resetAfterClose() {
+function resetAfterClose(saveDenoms) {
+  // Guardar cantidades de denominaciones del cierre para prefill de la siguiente apertura
+  const lastDenomQtys = saveDenoms
+    ? DENOMS.map((_, i) => parseFloat(document.getElementById(`cierreQty${i}`)?.value) || 0)
+    : state.lastDenomQtys || null;
+
   state = {
     cajaAbierta: false, cajaInicial: 0, ventasHastaAhora: 0,
     ultimoYape: 0, aperturaFecha: null, inicialMode: 'monto', inicialBreakdown: null,
-    eventos: [], yapesRaw: '',
+    eventos: [], yapesRaw: '', lastDenomQtys, _ts: 0,
   };
-  saveState();
+  saveStateNow();  // inmediato para que otros dispositivos vean el cierre
 
-  // Reset cierre form fields
   ['ventasFinal', 'yapesInput', 'cajaFinalExacto'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  document.getElementById('yapesChips').innerHTML            = '';
-  document.getElementById('totalYapesDisplay').textContent   = 'S/. 0.00';
-  document.getElementById('cierreDenomTotal').textContent    = 'S/. 0.00';
+  document.getElementById('yapesChips').innerHTML          = '';
+  document.getElementById('totalYapesDisplay').textContent = 'S/. 0.00';
+  document.getElementById('cierreDenomTotal').textContent  = 'S/. 0.00';
   DENOMS.forEach((_, i) => {
     const qEl = document.getElementById(`cierreQty${i}`);
     const sEl = document.getElementById(`cierreSub${i}`);
@@ -814,11 +873,9 @@ function resetAfterClose() {
     if (sEl) sEl.textContent = 'S/. 0.00';
   });
 
-  // Reset eventos UI
   const cardEv = document.getElementById('cardEventos');
   if (cardEv) cardEv.style.display = 'none';
 
-  // Reset apertura form and prefill denoms from last cierre
   document.getElementById('cajaInicialExacto').value = '';
   document.getElementById('ventasHastaAhora').value  = '';
   document.getElementById('ultimoYape').value        = '';
@@ -829,94 +886,47 @@ function resetAfterClose() {
     if (qEl) qEl.value = '';
     if (sEl) sEl.textContent = 'S/. 0.00';
   });
-  prefillInicialDenoms();
 
   showView('apertura');
 }
 
 // ============================================================
-//  REPORTS  (localStorage + Google Sheets)
+//  REPORTS — FIRESTORE HISTORIAL
 // ============================================================
-function getLocalReports() {
-  try { return JSON.parse(localStorage.getItem('cajaReportes') || '[]'); }
-  catch { return []; }
-}
-
-// Keep backward-compatible alias
-function getReports() { return getLocalReports(); }
-
-function saveReport(report) {
-  // 1. Save locally
+async function saveReport(report) {
   try {
-    const reports = getLocalReports();
-    reports.unshift(report);
-    localStorage.setItem('cajaReportes', JSON.stringify(reports));
-  } catch (e) {}
-
-  // 2. Fire-and-forget to Google Sheets (no-cors avoids CORS preflight on POST)
-  const url = localStorage.getItem('sheetsUrl');
-  if (url && isValidSheetsUrl(url)) {
-    fetch(url, {
-      method: 'POST',
-      mode: 'no-cors',
-      body: JSON.stringify({ action: 'saveReporte', reporte: report }),
-    }).catch(() => {}); // silent fail — data is safe locally
-  }
-}
-
-// Fetch all reports from Google Sheets
-async function fetchFromSheets() {
-  const url = localStorage.getItem('sheetsUrl');
-  if (!url || !isValidSheetsUrl(url)) return null;
-  try {
-    const res = await fetch(`${url}?action=getAll`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!Array.isArray(data)) return null;
-    return data.map(r => ({
-      id:               r['ID'],
-      fecha:            r['Fecha Cierre'],
-      aperturaFecha:    r['Apertura Fecha'],
-      cajaInicial:      parseFloat(r['Caja Inicial'])       || 0,
-      ventasHastaAhora: parseFloat(r['Ventas hasta ahora']) || 0,
-      ultimoYape:       parseFloat(r['Ultimo Yape'])        || 0,
-      ventasFinal:      parseFloat(r['Ventas Final'])       || 0,
-      totalYapes:       parseFloat(r['Total Yapes'])        || 0,
-      yapesList:        tryParseJSON(r['Yapes Lista'], []),
-      efectivoEsperado: parseFloat(r['Efectivo Esperado'])  || 0,
-      efectivoReal:     parseFloat(r['Efectivo Real'])      || 0,
-      diferencia:       parseFloat(r['Diferencia'])         || 0,
-    }));
+    await historialCol.add(report);
   } catch (e) {
-    return null;
+    console.error('Error guardando reporte:', e);
+    alert('Error al guardar el reporte en la base de datos. Verifica tu conexión.');
   }
 }
 
-// Get reports from Sheets if configured, else from localStorage
 async function getAllReports() {
-  const url = localStorage.getItem('sheetsUrl');
-  if (!url || !isValidSheetsUrl(url)) return getLocalReports();
-
-  const syncEl = document.getElementById('syncIndicator');
-  if (syncEl) syncEl.classList.remove('hidden');
-
-  const sheetsData = await fetchFromSheets();
-
-  if (syncEl) syncEl.classList.add('hidden');
-
-  if (sheetsData !== null) return sheetsData;
-
-  // Sheets unreachable — show warning and use local
-  if (syncEl) {
-    syncEl.textContent = '⚠️ Sin conexión con Sheets — mostrando datos locales';
-    syncEl.classList.remove('hidden');
-    setTimeout(() => syncEl.classList.add('hidden'), 3500);
+  try {
+    const snap = await historialCol.orderBy('fecha', 'desc').get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    // orderBy requires index; fallback without ordering
+    try {
+      const snap = await historialCol.get();
+      return snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    } catch (e2) {
+      console.error('Error cargando historial:', e2);
+      return [];
+    }
   }
-  return getLocalReports();
 }
 
 async function renderReportes() {
+  const syncEl = document.getElementById('syncIndicator');
+  if (syncEl) syncEl.classList.remove('hidden');
+
   const allReports = await getAllReports();
+
+  if (syncEl) syncEl.classList.add('hidden');
 
   const desde = document.getElementById('filtroDesde')?.value;
   const hasta = document.getElementById('filtroHasta')?.value;
@@ -998,217 +1008,14 @@ async function exportarExcel() {
 }
 
 // ============================================================
-//  GOOGLE SHEETS SETTINGS
-// ============================================================
-const APPS_SCRIPT_CODE = `// ── Pegar completo en Google Apps Script ──────────────────────
-
-function doGet(e) {
-  const a = (e.parameter.action || '').trim();
-  if (a === 'test') return R({ok: true, msg: 'Conexion exitosa'});
-
-  if (a === 'getAll') {
-    const sh   = getSheet();
-    const rows = sh.getDataRange().getValues();
-    if (rows.length < 2) return R([]);
-    const h = rows[0];
-    return R(rows.slice(1).reverse().map(r => {
-      const o = {};
-      h.forEach((k, i) => o[k] = r[i]);
-      return o;
-    }));
-  }
-
-  if (a === 'getEstado') {
-    const sh = getEstadoSheet();
-    if (sh.getLastRow() < 2) return R({ok: true, ts: 0, estado: null});
-    const row = sh.getRange(2, 1, 1, 2).getValues()[0];
-    return R({ok: true, ts: Number(row[0]), estado: row[1]});
-  }
-
-  // saveEstado via GET — POST loses body on Apps Script's 302 redirect
-  if (a === 'saveEstado') {
-    const ts  = parseInt(e.parameter.ts || '0');
-    const est = e.parameter.estado || '';
-    if (!est) return R({ok: false, error: 'sin datos'});
-    const sh = getEstadoSheet();
-    if (sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1);
-    sh.appendRow([ts, est]);
-    return R({ok: true});
-  }
-
-  return R({error: 'accion desconocida'});
-}
-
-function doPost(e) {
-  try {
-    const b = JSON.parse(e.postData.contents);
-
-    if (b.action === 'saveReporte') {
-      const r   = b.reporte;
-      const evs = r.eventos || [];
-      const egr = evs.reduce((s, ev) =>
-        (ev.tipo === 'Egreso' || ev.tipo === 'Divisa') ? s + ev.monto : s, 0);
-      const ing = evs.reduce((s, ev) =>
-        (ev.tipo === 'Ingreso' && ev.subtipo === 'Efectivo') ? s + ev.monto : s, 0);
-      const usd = evs.reduce((s, ev) =>
-        ev.tipo === 'Divisa' ? s + (ev.usd || 0) : s, 0);
-      getSheet().appendRow([
-        r.id, r.fecha, r.aperturaFecha,
-        r.cajaInicial, r.ventasHastaAhora, r.ultimoYape,
-        r.ventasFinal, r.totalYapes,
-        JSON.stringify(r.yapesList || []),
-        JSON.stringify(evs),
-        Math.round(egr * 100) / 100,
-        Math.round(ing * 100) / 100,
-        Math.round(usd * 100) / 100,
-        r.efectivoEsperado, r.efectivoReal, r.diferencia
-      ]);
-      return R({success: true});
-    }
-  } catch (err) { return R({error: err.toString()}); }
-  return R({error: 'accion desconocida'});
-}
-
-// ── Hoja de reportes cerrados ───────────────────────────────
-function getSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sh = ss.getSheetByName('Reportes');
-  if (!sh) {
-    sh = ss.insertSheet('Reportes');
-    const cols = [
-      'ID', 'Fecha Cierre', 'Apertura Fecha', 'Caja Inicial',
-      'Ventas hasta ahora', 'Ultimo Yape', 'Ventas Final',
-      'Total Yapes', 'Yapes Lista', 'Eventos',
-      'Total Egresos', 'Total Ingresos Ef.', 'Total USD',
-      'Efectivo Esperado', 'Efectivo Real', 'Diferencia'
-    ];
-    sh.appendRow(cols);
-    sh.getRange(1, 1, 1, cols.length)
-      .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
-  }
-  return sh;
-}
-
-// ── Hoja de estado en vivo (sincronización multi-dispositivo) ─
-function getEstadoSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sh = ss.getSheetByName('Estado');
-  if (!sh) {
-    sh = ss.insertSheet('Estado');
-    sh.appendRow(['ts', 'estado']);
-    sh.getRange(1, 1, 1, 2)
-      .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('#ffffff');
-  }
-  return sh;
-}
-
-function R(data) {
-  return ContentService
-    .createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
-}`;
-
-function openSettings() {
-  document.getElementById('sheetsUrlInput').value = localStorage.getItem('sheetsUrl') || '';
-  document.getElementById('scriptCodePre').textContent = APPS_SCRIPT_CODE;
-  document.getElementById('connStatus').className = 'conn-status hidden';
-  document.getElementById('settingsModal').classList.remove('hidden');
-}
-
-function closeSettings() {
-  document.getElementById('settingsModal').classList.add('hidden');
-}
-
-function isValidSheetsUrl(url) {
-  try {
-    const u = new URL(url);
-    return u.protocol === 'https:' && u.hostname === 'script.google.com';
-  } catch { return false; }
-}
-
-function saveSettings() {
-  const url = document.getElementById('sheetsUrlInput').value.trim();
-  if (url && !isValidSheetsUrl(url)) {
-    setConnStatus('error', '❌ URL inválida. Debe ser https://script.google.com/...');
-    return;
-  }
-  if (url) {
-    localStorage.setItem('sheetsUrl', url);
-  } else {
-    localStorage.removeItem('sheetsUrl');
-  }
-  closeSettings();
-}
-
-async function testConnection() {
-  const url = document.getElementById('sheetsUrlInput').value.trim();
-  if (!url) { setConnStatus('error', 'Ingresa una URL primero.'); return; }
-  if (!isValidSheetsUrl(url)) { setConnStatus('error', '❌ URL inválida. Debe ser https://script.google.com/...'); return; }
-
-  setConnStatus('loading', 'Probando conexión...');
-  try {
-    const res  = await fetch(`${url}?action=test`);
-    const data = await res.json();
-    if (data.ok) {
-      setConnStatus('ok', '✅ ' + (data.msg || 'Conexión exitosa'));
-    } else {
-      setConnStatus('error', '⚠️ El script respondió con error: ' + JSON.stringify(data));
-    }
-  } catch (e) {
-    setConnStatus('error', '❌ No se pudo conectar. Verifica que el script esté desplegado con acceso "Cualquier persona".');
-  }
-}
-
-function setConnStatus(type, msg) {
-  const el = document.getElementById('connStatus');
-  el.className = `conn-status conn-${type}`;
-  el.textContent = msg;
-}
-
-function copyScript(btn) {
-  navigator.clipboard.writeText(APPS_SCRIPT_CODE).then(() => {
-    btn.textContent = '✅ Copiado';
-    setTimeout(() => { btn.textContent = '📋 Copiar código'; }, 2000);
-  }).catch(() => {
-    // Fallback for browsers without clipboard API
-    const el = document.getElementById('scriptCodePre');
-    const sel = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    sel.removeAllRanges();
-    sel.addRange(range);
-    document.execCommand('copy');
-    btn.textContent = '✅ Copiado';
-    setTimeout(() => { btn.textContent = '📋 Copiar código'; }, 2000);
-  });
-}
-
-// ============================================================
-//  DENOMINATION MEMORY
-// ============================================================
-function prefillInicialDenoms() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('lastCierreDenoms') || 'null');
-    if (!Array.isArray(saved)) return;
-    saved.forEach((qty, i) => {
-      if (!qty) return;
-      const input = document.getElementById(`inicialQty${i}`);
-      if (input) { input.value = qty; onDenomInput('inicial', i); }
-    });
-  } catch (e) {}
-}
-
-// ============================================================
 //  EVENTOS
 // ============================================================
 function openEventosModal() {
   currentEventoTipo    = 'Egreso';
   currentEventoSubtipo = 'Efectivo';
-  // Reset fields
   ['evDesc','evDivisaDesc'].forEach(id => { document.getElementById(id).value = ''; });
   ['evMonto','evUSD','evTC'].forEach(id => { document.getElementById(id).value = ''; });
   document.getElementById('evDivisaSoles').textContent = 'S/. 0.00';
-  // Set type buttons
   ['tglEvEgreso','tglEvDivisa','tglEvIngreso'].forEach(id =>
     document.getElementById(id).classList.remove('active')
   );
@@ -1216,7 +1023,6 @@ function openEventosModal() {
   document.getElementById('evFieldsBasic').style.display = '';
   document.getElementById('evFieldsDivisa').classList.add('hidden');
   document.getElementById('evSubtipoWrap').style.display = 'none';
-  // Reset subtipo buttons
   document.getElementById('tglSubEfectivo').classList.add('active');
   document.getElementById('tglSubYape').classList.remove('active');
   document.getElementById('eventosModal').classList.remove('hidden');
@@ -1225,6 +1031,9 @@ function openEventosModal() {
 function closeEventosModal() {
   document.getElementById('eventosModal').classList.add('hidden');
 }
+
+let currentEventoTipo    = 'Egreso';
+let currentEventoSubtipo = 'Efectivo';
 
 function setEventoTipo(tipo) {
   currentEventoTipo = tipo;
@@ -1247,8 +1056,7 @@ function setEventoSubtipo(subtipo) {
 function calcDivisa() {
   const usd   = parseFloat(document.getElementById('evUSD').value) || 0;
   const tc    = parseFloat(document.getElementById('evTC').value)  || 0;
-  const soles = round2(usd * tc);
-  document.getElementById('evDivisaSoles').textContent = fmt(soles);
+  document.getElementById('evDivisaSoles').textContent = fmt(round2(usd * tc));
 }
 
 function addEvento() {
@@ -1258,8 +1066,7 @@ function addEvento() {
     usd   = parseFloat(document.getElementById('evUSD').value) || 0;
     tc    = parseFloat(document.getElementById('evTC').value)  || 0;
     monto = round2(usd * tc);
-    desc  = document.getElementById('evDivisaDesc').value.trim()
-            || `$${usd.toFixed(2)} × ${tc}`;
+    desc  = document.getElementById('evDivisaDesc').value.trim() || `$${usd.toFixed(2)} × ${tc}`;
     if (!usd || !tc) { alert('Ingresa el monto en USD y el tipo de cambio.'); return; }
   } else {
     monto = parseFloat(document.getElementById('evMonto').value) || 0;
@@ -1273,8 +1080,8 @@ function addEvento() {
     subtipo: currentEventoTipo === 'Ingreso' ? currentEventoSubtipo : null,
     desc,
     monto,
-    usd:     currentEventoTipo === 'Divisa' ? usd : null,
-    tc:      currentEventoTipo === 'Divisa' ? tc  : null,
+    usd:  currentEventoTipo === 'Divisa' ? usd : null,
+    tc:   currentEventoTipo === 'Divisa' ? tc  : null,
   };
 
   if (!state.eventos) state.eventos = [];
@@ -1302,12 +1109,11 @@ function _renderEventosInto(cardId, listId) {
   const list = document.getElementById(listId);
   if (!card || !list) return;
 
-  const eventos   = state.eventos || [];
-  const totalEgr  = getEventosEgresos();
-  const totalIng  = getEventosIngresos();
-  const totalUSD  = getTotalUSD();
+  const eventos  = state.eventos || [];
+  const totalEgr = getEventosEgresos();
+  const totalIng = getEventosIngresos();
+  const totalUSD = getTotalUSD();
 
-  // USD banner only exists in cierre view
   if (cardId === 'cardEventos') {
     const usdBanner = document.getElementById('usdEnCaja');
     const usdVal    = document.getElementById('usdEnCajaVal');
@@ -1322,10 +1128,10 @@ function _renderEventosInto(cardId, listId) {
 
   list.innerHTML = eventos.map((e, i) => {
     let badgeClass, badgeLabel, montoClass;
-    if      (e.tipo === 'Egreso')              { badgeClass = 'ev-egreso';     badgeLabel = 'Egreso';    montoClass = 'ev-monto-egr'; }
-    else if (e.tipo === 'Divisa')              { badgeClass = 'ev-divisa';     badgeLabel = 'Divisa';    montoClass = 'ev-monto-egr'; }
-    else if (e.subtipo === 'Yape')             { badgeClass = 'ev-ingreso-yp'; badgeLabel = 'Ing. Yape'; montoClass = 'ev-monto-ing'; }
-    else                                       { badgeClass = 'ev-ingreso-ef'; badgeLabel = 'Ing. Ef.';  montoClass = 'ev-monto-ing'; }
+    if      (e.tipo === 'Egreso')  { badgeClass = 'ev-egreso';     badgeLabel = 'Egreso';    montoClass = 'ev-monto-egr'; }
+    else if (e.tipo === 'Divisa')  { badgeClass = 'ev-divisa';     badgeLabel = 'Divisa';    montoClass = 'ev-monto-egr'; }
+    else if (e.subtipo === 'Yape') { badgeClass = 'ev-ingreso-yp'; badgeLabel = 'Ing. Yape'; montoClass = 'ev-monto-ing'; }
+    else                           { badgeClass = 'ev-ingreso-ef'; badgeLabel = 'Ing. Ef.';  montoClass = 'ev-monto-ing'; }
 
     const sign       = (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? '−' : '+';
     const divisaNote = e.tipo === 'Divisa'
@@ -1373,7 +1179,6 @@ async function generarPDF(d) {
     return y;
   }
 
-  // ---- HEADER ----
   doc.setFillColor(...BLUE);
   doc.rect(0, 0, pw, 32, 'F');
   doc.setTextColor(255, 255, 255);
@@ -1390,13 +1195,12 @@ async function generarPDF(d) {
 
   let y = 40;
 
-  // ---- APERTURA ----
   y = pdfSec(doc, 'DATOS DE APERTURA', y, pw, mg, BLUE, LBLUE);
   if (d.aperturaFecha)
     y = pdfRow(doc, 'Fecha apertura', new Date(d.aperturaFecha).toLocaleString('es-PE'), y, mg, pw, DARK, BLUE);
-  y = pdfRow(doc, 'Caja Inicial',       fmt(d.cajaInicial),       y, mg, pw, DARK, BLUE);
-  y = pdfRow(doc, 'Ventas hasta ahora', fmt(d.ventasHastaAhora),  y, mg, pw, DARK, BLUE);
-  y = pdfRow(doc, 'Último Yape',        fmt(d.ultimoYape),         y, mg, pw, DARK, BLUE);
+  y = pdfRow(doc, 'Caja Inicial',       fmt(d.cajaInicial),      y, mg, pw, DARK, BLUE);
+  y = pdfRow(doc, 'Ventas hasta ahora', fmt(d.ventasHastaAhora), y, mg, pw, DARK, BLUE);
+  y = pdfRow(doc, 'Último Yape',        fmt(d.ultimoYape),        y, mg, pw, DARK, BLUE);
 
   if (d.inicialMode === 'denom' && d.inicialBreakdown?.length) {
     y = newPageIfNeeded(y, d.inicialBreakdown.length * 4 + 8);
@@ -1410,7 +1214,6 @@ async function generarPDF(d) {
   }
   y += 5;
 
-  // ---- VENTAS & YAPES ----
   y = newPageIfNeeded(y, 30);
   y = pdfSec(doc, 'VENTAS Y YAPES', y, pw, mg, BLUE, LBLUE);
   y = pdfRow(doc, 'Ventas Final', fmt(d.ventasFinal), y, mg, pw, DARK, BLUE);
@@ -1429,7 +1232,6 @@ async function generarPDF(d) {
   y = pdfRow(doc, 'Total Yapes', fmt(d.totalYapes), y, mg, pw, DARK, BLUE);
   y += 5;
 
-  // ---- EVENTOS ----
   if (d.eventos?.length) {
     y = newPageIfNeeded(y, d.eventos.length * 6 + 20);
     y = pdfSec(doc, 'EVENTOS DE CAJA', y, pw, mg, BLUE, LBLUE);
@@ -1448,7 +1250,6 @@ async function generarPDF(d) {
     y += 2;
   }
 
-  // ---- CÁLCULO ----
   const evExtraRows = ((d.eventos || []).some(e => e.tipo === 'Egreso' || e.tipo === 'Divisa') ? 1 : 0)
                     + ((d.eventos || []).some(e => e.tipo === 'Ingreso' && e.subtipo === 'Efectivo') ? 1 : 0);
   const calcBoxH = 50 + evExtraRows * 7;
@@ -1467,16 +1268,16 @@ async function generarPDF(d) {
     fy += 7;
   };
 
-  fRow('Ventas Final',          d.ventasFinal,         DARK);
-  fRow('− Ventas hasta ahora',  d.ventasHastaAhora,    ORANGE);
-  fRow('− Total Yapes',         d.totalYapes,           ORANGE);
+  fRow('Ventas Final',         d.ventasFinal,        DARK);
+  fRow('− Ventas hasta ahora', d.ventasHastaAhora,   ORANGE);
+  fRow('− Total Yapes',        d.totalYapes,          ORANGE);
   const egr = (d.eventos || []).reduce((s, e) =>
     (e.tipo === 'Egreso' || e.tipo === 'Divisa') ? s + e.monto : s, 0);
   const ing = (d.eventos || []).reduce((s, e) =>
     (e.tipo === 'Ingreso' && e.subtipo === 'Efectivo') ? s + e.monto : s, 0);
-  if (egr > 0) fRow('− Egresos / Divisa', round2(egr), ORANGE);
-  if (ing > 0) fRow('+ Ingresos (efectivo)', round2(ing), GREEN);
-  fRow('+ Caja Inicial',        d.cajaInicial,          GREEN);
+  if (egr > 0) fRow('− Egresos / Divisa',     round2(egr), ORANGE);
+  if (ing > 0) fRow('+ Ingresos (efectivo)',   round2(ing), GREEN);
+  fRow('+ Caja Inicial',       d.cajaInicial,        GREEN);
 
   doc.setDrawColor(...GRAY); doc.line(c1, fy - 1, c2, fy - 1); fy += 4;
   doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
@@ -1484,7 +1285,6 @@ async function generarPDF(d) {
   doc.text(fmt(d.efectivoEsperado), c2, fy, { align: 'right' });
   y = fy + 10;
 
-  // ---- EFECTIVO REAL ----
   y = newPageIfNeeded(y, 30);
   y += 2;
   y = pdfSec(doc, 'EFECTIVO REAL EN CAJA', y, pw, mg, BLUE, LBLUE);
@@ -1502,7 +1302,6 @@ async function generarPDF(d) {
   }
   y += 6;
 
-  // ---- RESULTADO ----
   y = newPageIfNeeded(y, 28);
   y = pdfSec(doc, 'RESULTADO FINAL', y, pw, mg, BLUE, LBLUE);
 
@@ -1510,9 +1309,7 @@ async function generarPDF(d) {
   const diffBg    = d.diferencia < 0 ? [254, 226, 226] : [220, 252, 231];
   const diffText  = d.diferencia === 0
     ? '✓  Caja exacta — todo cuadra'
-    : d.diferencia > 0
-      ? `Sobra   ${fmt(d.diferencia)}`
-      : `Falta   ${fmt(Math.abs(d.diferencia))}`;
+    : d.diferencia > 0 ? `Sobra   ${fmt(d.diferencia)}` : `Falta   ${fmt(Math.abs(d.diferencia))}`;
 
   doc.setFillColor(...diffBg); doc.setDrawColor(...diffColor);
   doc.roundedRect(mg, y, pw - mg * 2, 16, 3, 3, 'FD');
@@ -1520,7 +1317,6 @@ async function generarPDF(d) {
   doc.text(diffText, pw / 2, y + 10, { align: 'center' });
   y += 22;
 
-  // USD en caja
   const totalUSDPDF = (d.eventos || []).reduce((s, e) =>
     e.tipo === 'Divisa' ? s + (e.usd || 0) : s, 0);
   if (totalUSDPDF > 0) {
@@ -1532,7 +1328,6 @@ async function generarPDF(d) {
     y += 16;
   }
 
-  // ---- FOOTER ----
   doc.setDrawColor(...GRAY); doc.line(mg, ph - 14, pw - mg, ph - 14);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
   doc.text('Reporte generado por Control de Caja', pw / 2, ph - 8, { align: 'center' });
@@ -1541,7 +1336,6 @@ async function generarPDF(d) {
   doc.save(`Cierre_Caja_${new Date(d.fecha).toLocaleDateString('es-PE').replace(/\//g, '-')}.pdf`);
 }
 
-// PDF helpers
 function pdfSec(doc, title, y, pw, mg, BLUE, LBLUE) {
   doc.setFillColor(...LBLUE); doc.setDrawColor(...BLUE);
   doc.roundedRect(mg, y, pw - mg * 2, 9, 2, 2, 'FD');
@@ -1560,31 +1354,15 @@ function pdfRow(doc, label, value, y, mg, pw, DARK, BLUE) {
 }
 
 // ============================================================
-//  INACTIVITY TIMER
+//  INACTIVITY TIMER (desactivado)
 // ============================================================
-function startInactivityTimer() { /* auto-logout disabled */ }
-
-function stopInactivityTimer() {
+function startInactivityTimer()  { /* desactivado */ }
+function stopInactivityTimer()   {
   clearTimeout(_inactivityTimer);
   clearTimeout(_warningTimer);
   clearInterval(_countdownInterval);
 }
-
-function resetInactivityTimer() { /* auto-logout disabled */ }
-
-function _showInactivityWarning() {
-  const warn = document.getElementById('inactivityWarning');
-  if (!warn) return;
-  warn.classList.remove('hidden');
-  let secs = Math.round(WARNING_AHEAD_MS / 1000);
-  document.getElementById('inactivityCountdown').textContent = secs;
-  _countdownInterval = setInterval(() => {
-    secs--;
-    const el = document.getElementById('inactivityCountdown');
-    if (el) el.textContent = secs;
-    if (secs <= 0) clearInterval(_countdownInterval);
-  }, 1000);
-}
+function resetInactivityTimer()  { /* desactivado */ }
 
 // ============================================================
 //  UTILS
@@ -1592,7 +1370,6 @@ function _showInactivityWarning() {
 function round2(n) { return Math.round(n * 100) / 100; }
 function fmt(n)    { return `S/. ${(+n).toFixed(2)}`; }
 
-// Escape HTML special characters to prevent XSS
 function escHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -1604,10 +1381,4 @@ function escHtml(str) {
 
 function tryParseJSON(str, fallback) {
   try { return JSON.parse(str); } catch { return fallback; }
-}
-
-// SHA-256 via Web Crypto API (built into all modern browsers, no library needed)
-async function sha256(str) {
-  const buf  = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }

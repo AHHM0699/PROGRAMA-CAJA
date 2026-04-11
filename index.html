@@ -13,11 +13,14 @@
   <div class="login-box">
     <div class="login-icon">💰</div>
     <h1>Control de Caja</h1>
-    <p class="login-sub">Ingrese su contraseña para acceder</p>
+    <p class="login-sub">Ingrese sus credenciales para acceder</p>
+    <input type="email" id="emailInput" class="form-control" placeholder="Correo electrónico"
+      style="margin-bottom:10px"
+      onkeypress="if(event.key==='Enter') document.getElementById('passInput').focus()">
     <input type="password" id="passInput" class="form-control" placeholder="Contraseña"
       onkeypress="if(event.key==='Enter') login()">
     <button class="btn btn-primary btn-block" onclick="login()">Ingresar</button>
-    <p id="loginError" class="error-msg">Contraseña incorrecta</p>
+    <p id="loginError" class="error-msg"></p>
   </div>
 </div>
 
@@ -30,7 +33,6 @@
       <span id="headerDate" class="header-date"></span>
       <span id="empleadoBadge" class="empleado-badge hidden">👤 Modo empleado</span>
       <button id="btnHistorial" class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
-      <button id="btnConfig"    class="btn btn-ghost" onclick="openSettings()">⚙️ Config</button>
       <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
     </div>
   </header>
@@ -260,9 +262,8 @@
         <button class="btn btn-secondary" onclick="showView('auto')">← Volver</button>
       </div>
 
-      <!-- Sync indicator -->
       <div id="syncIndicator" class="sync-indicator hidden">
-        <span class="sync-spinner"></span> Sincronizando con Google Sheets...
+        <span class="sync-spinner"></span> Cargando historial...
       </div>
 
       <div class="card">
@@ -380,68 +381,6 @@
 </div><!-- /mainApp -->
 
 
-<!-- ===== SETTINGS MODAL ===== -->
-<div id="settingsModal" class="modal-overlay hidden" onclick="if(event.target===this) closeSettings()">
-  <div class="modal-box">
-    <div class="modal-head">
-      <h3>⚙️ Configuración — Google Sheets</h3>
-      <button class="btn-close" onclick="closeSettings()">✕</button>
-    </div>
-    <div class="modal-body">
-      <p class="modal-desc">
-        Conecta la app con Google Sheets para sincronizar los reportes entre dispositivos.
-        Los datos también seguirán guardados localmente como respaldo.
-      </p>
-
-      <div class="setup-steps">
-        <div class="setup-step">
-          <span class="setup-step-n">1</span>
-          <div>Abre <strong>Google Sheets</strong>, crea una hoja nueva y ve a
-            <strong>Extensiones → Apps Script</strong>.</div>
-        </div>
-        <div class="setup-step">
-          <span class="setup-step-n">2</span>
-          <div>Borra todo el contenido del editor, pega el código de abajo y guarda
-            (<kbd>Ctrl+S</kbd>).</div>
-        </div>
-      </div>
-
-      <div class="code-block-wrap">
-        <button class="btn btn-sm btn-secondary copy-btn" onclick="copyScript(this)">📋 Copiar código</button>
-        <pre id="scriptCodePre" class="script-pre"></pre>
-      </div>
-
-      <div class="setup-steps" style="margin-top:12px">
-        <div class="setup-step">
-          <span class="setup-step-n">3</span>
-          <div>Clic en <strong>Implementar → Nueva implementación</strong>.
-            Tipo: <strong>Aplicación web</strong>.
-            Acceso: <strong>"Cualquier persona"</strong>.
-            Copia la URL generada.</div>
-        </div>
-        <div class="setup-step">
-          <span class="setup-step-n">4</span>
-          <div>Pega la URL aquí y prueba la conexión:</div>
-        </div>
-      </div>
-
-      <div style="margin-top:10px">
-        <label class="field-label">URL del Apps Script</label>
-        <input type="url" id="sheetsUrlInput" class="form-control"
-          placeholder="https://script.google.com/macros/s/AKfy.../exec">
-      </div>
-
-      <div id="connStatus" class="conn-status hidden"></div>
-
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="testConnection()">🔍 Probar conexión</button>
-        <button class="btn btn-primary" onclick="saveSettings()">Guardar</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-
 <!-- ===== EVENTOS MODAL ===== -->
 <div id="eventosModal" class="modal-overlay hidden" onclick="if(event.target===this) closeEventosModal()">
   <div class="modal-box" style="max-width:480px">
@@ -509,11 +448,16 @@
 </div>
 
 
-<!-- Inactivity warning toast -->
+<!-- Inactivity warning (desactivado, se mantiene en DOM por compatibilidad) -->
 <div id="inactivityWarning" class="inactivity-warning hidden">
   <span>⏱ Sesión inactiva — cerrando en <strong><span id="inactivityCountdown">60</span>s</strong></span>
   <button class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4)" onclick="resetInactivityTimer()">Seguir</button>
 </div>
+
+<!-- Firebase SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 
 <!-- jsPDF y xlsx se cargan bajo demanda (lazy) para reducir uso de memoria -->
 <script src="app.js"></script>
