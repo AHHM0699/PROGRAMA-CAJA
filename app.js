@@ -166,8 +166,8 @@ async function login() {
 function _applyRoleUI() {
   const isEmp = userRole === 'employee';
   document.getElementById('empleadoBadge').classList.toggle('hidden', !isEmp);
-  document.getElementById('btnHistorial').style.display = isEmp ? 'none' : '';
-  document.getElementById('btnFlujo').style.display     = isEmp ? 'none' : '';
+  document.getElementById('btnHistorial').classList.toggle('hidden', isEmp);
+  document.getElementById('btnFlujo').classList.toggle('hidden', isEmp);
   document.getElementById('btnCajas').classList.toggle('hidden', false); // siempre visible tras login
 }
 
