@@ -216,12 +216,12 @@ async function _renderCajasLista() {
 
     // Empleado con una sola caja → auto-seleccionar
     if (userRole === 'employee' && cajas.length === 1) {
-      await selectCaja(cajas[0].id, cajas[0].nombre);
+      await selectCaja(cajas[0].id);
       return;
     }
 
     lista.innerHTML = cajas.map(c => `
-      <div class="caja-item" onclick="selectCaja('${c.id}', ${JSON.stringify(escHtml(c.nombre || 'Sin nombre'))})">
+      <div class="caja-item" onclick="selectCaja('${c.id}')">
         <div>
           <div class="caja-item-name">${escHtml(c.nombre || 'Sin nombre')}</div>
           <div class="caja-item-meta">
@@ -237,12 +237,12 @@ async function _renderCajasLista() {
   }
 }
 
-async function selectCaja(cajaId, cajaNombre) {
-  currentCajaId     = cajaId;
-  currentCajaNombre = cajaNombre;
+async function selectCaja(cajaId) {
+  currentCajaId = cajaId;
 
   state = _defaultState();
   await _loadStateFromFirestore();
+  currentCajaNombre = state.nombre || '';
   startRealtimeSync();
 
   document.getElementById('cajaSelectorScreen').style.display = 'none';
