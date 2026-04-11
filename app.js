@@ -13,12 +13,12 @@
 //       role: "employee" ← para el empleado
 // ============================================================
 const firebaseConfig = {
-  apiKey:            'TU_API_KEY',
-  authDomain:        'TU_PROYECTO.firebaseapp.com',
-  projectId:         'TU_PROYECTO_ID',
-  storageBucket:     'TU_PROYECTO.appspot.com',
-  messagingSenderId: 'TU_SENDER_ID',
-  appId:             'TU_APP_ID',
+  apiKey:            'AIzaSyAhujUO4G1CMgdXXecomb1oMBiW9uWwkHY',
+  authDomain:        'programa-caja.firebaseapp.com',
+  projectId:         'programa-caja',
+  storageBucket:     'programa-caja.firebasestorage.app',
+  messagingSenderId: '622065869233',
+  appId:             '1:622065869233:web:60a043430ee81937e29d90',
 };
 
 // ============================================================
