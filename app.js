@@ -173,27 +173,82 @@ function _applyRoleUI() {
 
 let _yapesWin = null;
 async function openYapesWidget() {
-  const url = 'yapes-widget.html' + (currentCajaId ? '?cajaId=' + currentCajaId : '');
-
-  // Document Picture-in-Picture: ventana flotante siempre encima (requiere HTTPS)
+  // ── Document Picture-in-Picture ────────────────────────────────────────
+  // Nativo del navegador: siempre encima de TODAS las apps. Requiere HTTPS.
   if ('documentPictureInPicture' in window) {
     try {
       const pip = window.documentPictureInPicture;
-      // Si ya está abierto cerrarlo para reabrirlo fresco
-      if (pip.window) pip.window.close();
+      if (pip.window) { pip.window.focus(); return; }
+
       const pipWin = await pip.requestWindow({ width: 200, height: 90 });
-      pipWin.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#000';
-      const iframe = pipWin.document.createElement('iframe');
-      iframe.src = url;
-      iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-      pipWin.document.body.appendChild(iframe);
+
+      pipWin.document.head.innerHTML = `<style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:'Segoe UI',sans-serif;background:#fff;display:flex;flex-direction:column;height:100vh;overflow:hidden;user-select:none}
+        .hdr{background:linear-gradient(135deg,#14532d,#16a34a);padding:3px 8px;height:20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+        .brand{font-size:11px;font-weight:900;font-style:italic;font-family:Georgia,serif;background:linear-gradient(135deg,#22c55e,#eab308,#f97316,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+        .caja{font-size:8px;color:rgba(255,255,255,.8);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .row{padding:5px 6px;display:flex;gap:5px;align-items:center;flex:1}
+        .wrap{position:relative;flex:1;display:flex;align-items:center}
+        .pfx{position:absolute;left:6px;font-size:10px;font-weight:700;color:#94a3b8;pointer-events:none}
+        input{width:100%;padding:3px 4px 3px 20px;border:1.5px solid #e2e8f0;border-radius:6px;font-size:14px;font-weight:700;color:#14532d;background:#f8fafc;height:26px;font-family:inherit}
+        input:focus{outline:none;border-color:#16a34a;background:#fff}
+        button{width:26px;height:26px;background:#16a34a;color:#fff;border:none;border-radius:6px;font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;flex-shrink:0}
+        button:active{transform:scale(.9)}
+        .toast{position:fixed;bottom:3px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;font-size:9px;font-weight:700;padding:1px 8px;border-radius:8px;opacity:0;transition:opacity .15s;white-space:nowrap;pointer-events:none}
+        .toast.show{opacity:1}
+      </style>`;
+
+      pipWin.document.body.innerHTML = `
+        <div class="hdr">
+          <span class="brand">Che plaS</span>
+          <span class="caja">${currentCajaNombre || ''}</span>
+        </div>
+        <div class="row">
+          <div class="wrap">
+            <span class="pfx">S/.</span>
+            <input type="number" id="pipInput" placeholder="0.00" step="0.01" min="0">
+          </div>
+          <button id="pipBtn">+</button>
+        </div>
+        <div class="toast" id="pipToast"></div>`;
+
+      const inp   = pipWin.document.getElementById('pipInput');
+      const btn   = pipWin.document.getElementById('pipBtn');
+      const toast = pipWin.document.getElementById('pipToast');
+      let _t = null;
+
+      function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add('show');
+        clearTimeout(_t);
+        _t = setTimeout(() => toast.classList.remove('show'), 1500);
+      }
+
+      // Usa el db y currentCajaId del contexto principal (sin Firebase extra)
+      async function addYape() {
+        const val = parseFloat(inp.value);
+        if (!val || val <= 0 || !currentCajaId) { inp.select(); return; }
+        const snap   = await db.doc(`cajas/${currentCajaId}`).get();
+        const cur    = snap.exists ? (snap.data().yapesRaw || '') : '';
+        const newRaw = cur ? cur + '\n' + val.toFixed(2) : val.toFixed(2);
+        inp.value = '';
+        inp.focus();
+        showToast(`✓ S/. ${val.toFixed(2)}`);
+        await db.doc(`cajas/${currentCajaId}`).update({ yapesRaw: newRaw, _ts: Date.now() });
+      }
+
+      btn.addEventListener('click', addYape);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addYape(); } });
+      setTimeout(() => inp.focus(), 100);
       return;
-    } catch(e) { console.warn('PiP no disponible, usando popup:', e); }
+    } catch(e) { console.warn('PiP:', e); }
   }
 
-  // Fallback: popup normal (file:// o navegadores sin PiP)
+  // ── Fallback: popup normal (file:// o Brave sin PiP) ──────────────────
   if (_yapesWin && !_yapesWin.closed) { _yapesWin.focus(); return; }
   const W = 200, H = 90;
+  const url = 'yapes-widget.html' + (currentCajaId ? '?cajaId=' + currentCajaId : '');
   _yapesWin = window.open(url, 'YapesWidget',
     `popup,width=${W},height=${H},left=${screen.availLeft+10},top=${screen.availTop+screen.availHeight-H-10}`);
 }
