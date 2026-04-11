@@ -34,6 +34,6 @@ for ($i = 0; $i -lt 10; $i++) {
 }
 
 if ($hwnd -ne [IntPtr]::Zero) {
-    [Win32]::SetWindowPos($hwnd, [IntPtr](-1), 0, 0, 0, 0, 3u)  # TOPMOST + NOMOVE + NOSIZE
+    [Win32]::SetWindowPos($hwnd, [IntPtr](-1), 0, 0, 0, 0, 3)  # TOPMOST + NOMOVE + NOSIZE
     [Win32]::SetForegroundWindow($hwnd)
 }

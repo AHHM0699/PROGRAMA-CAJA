@@ -46,7 +46,7 @@ $y = $screen.Bottom - $H - 10
 $existing = [Win32]::FindByTitle("Yapes")
 if ($existing -ne [IntPtr]::Zero) {
     [Win32]::ShowWindow($existing, 9)
-    [Win32]::SetWindowPos($existing, [IntPtr](-1), 0, 0, 0, 0, 3u)
+    [Win32]::SetWindowPos($existing, [IntPtr](-1), 0, 0, 0, 0, 3)
     [Win32]::SetForegroundWindow($existing)
     exit
 }
@@ -61,6 +61,6 @@ for ($i = 0; $i -lt 30; $i++) {
     if ($hwnd -ne [IntPtr]::Zero) { break }
 }
 if ($hwnd -ne [IntPtr]::Zero) {
-    [Win32]::SetWindowPos($hwnd, [IntPtr](-1), $x, $y, $W, $H, 0u)
+    [Win32]::SetWindowPos($hwnd, [IntPtr](-1), $x, $y, $W, $H, 0)
     [Win32]::SetForegroundWindow($hwnd)
 }
