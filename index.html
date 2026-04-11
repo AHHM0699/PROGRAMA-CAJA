@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Control de Caja</title>
+  <title>Che plaS — Control de Caja</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png">
+  <meta name="theme-color" content="#16a34a">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -710,5 +714,10 @@
 
 <!-- jsPDF y xlsx se cargan bajo demanda (lazy) para reducir uso de memoria -->
 <script src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+</script>
 </body>
 </html>
