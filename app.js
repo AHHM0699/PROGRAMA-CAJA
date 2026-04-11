@@ -134,6 +134,10 @@ async function _initSession(user) {
   // Start real-time listener
   startRealtimeSync();
 
+  // Mostrar app (por si se llegó aquí desde una recarga con sesión activa)
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display     = 'block';
+
   _applyRoleUI();
   showView('auto');
 }
