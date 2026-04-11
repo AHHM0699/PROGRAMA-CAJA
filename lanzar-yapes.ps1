@@ -1,5 +1,5 @@
 $widgetPath = "file:///C:/Users/Che%20plas/PROGRAMA-CAJA/yapes-widget.html"
-$W = 280; $H = 110
+$W = 200; $H = 62   # solo contenido; el OS agrega ~32px de barra de titulo
 
 $bravePaths = @(
     "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
@@ -38,36 +38,43 @@ public class Win32 {
 }
 "@
 
+# Posicion: esquina inferior izquierda
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $x = $screen.Left + 10
 $y = $screen.Bottom - $H - 10
 
-# Si ya esta abierto, traerlo al frente
+# Tamaño total de la ventana OS (contenido + barra de titulo ~32px)
+$winH = $H + 32
+
+# Si ya esta abierto, traerlo al frente con el tamano correcto
 $existing = [Win32]::FindByTitle("Yapes")
 if ($existing -ne [IntPtr]::Zero) {
     [Win32]::ShowWindow($existing, 9)
-    [Win32]::SetWindowPos($existing, [IntPtr](-1), $x, $y, $W, $H, 0)
+    [Win32]::SetWindowPos($existing, [IntPtr](-1), $x, ($screen.Bottom - $winH - 10), $W, $winH, 0)
     [Win32]::SetForegroundWindow($existing)
     exit
 }
 
-Start-Process $brave -ArgumentList "--app=`"$widgetPath`" --window-size=$W,$H"
+# Lanzar Brave en modo app
+Start-Process $brave -ArgumentList "--app=`"$widgetPath`" --window-size=$W,$winH"
 
-# Esperar ventana y forzar tamano + posicion + siempre visible
+# Esperar a que aparezca la ventana
 $hwnd = [IntPtr]::Zero
-for ($i = 0; $i -lt 20; $i++) {
-    Start-Sleep -Milliseconds 500
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Milliseconds 300
     $hwnd = [Win32]::FindByTitle("Yapes")
     if ($hwnd -ne [IntPtr]::Zero) { break }
 }
 
-if ($hwnd -ne [IntPtr]::Zero) {
-    # Esperar un poco mas para que Brave termine de restaurar su tamano guardado
-    Start-Sleep -Milliseconds 800
-    # Forzar posicion + tamano + topmost en una sola llamada (flag 0 = todo)
-    [Win32]::SetWindowPos($hwnd, [IntPtr](-1), $x, $y, $W, $H, 0)
-    Start-Sleep -Milliseconds 300
-    # Segunda pasada por si Brave pelea el tamano
-    [Win32]::SetWindowPos($hwnd, [IntPtr](-1), $x, $y, $W, $H, 0)
-    [Win32]::SetForegroundWindow($hwnd)
+if ($hwnd -eq [IntPtr]::Zero) { exit }
+
+# Brave restaura el tamano guardado despues de aparecer.
+# Forzamos el tamano en un loop durante 4 segundos para ganarle.
+$posY    = $screen.Bottom - $winH - 10
+$deadline = (Get-Date).AddSeconds(4)
+while ((Get-Date) -lt $deadline) {
+    [Win32]::SetWindowPos($hwnd, [IntPtr](-1), $x, $posY, $W, $winH, 0)
+    Start-Sleep -Milliseconds 80
 }
+
+[Win32]::SetForegroundWindow($hwnd)
