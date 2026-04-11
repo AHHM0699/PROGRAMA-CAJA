@@ -253,9 +253,27 @@ let _unsub    = null;
 let _yapesRaw = '';
 let _toastTimer = null;
 
+const COMPACT_W = 200, COMPACT_H = 90;
+const LOGIN_W   = 300, LOGIN_H   = 210;
+
+function goCompact() {
+  try {
+    window.resizeTo(COMPACT_W, COMPACT_H);
+    window.moveTo(screen.availLeft + 10,
+                  screen.availTop + screen.availHeight - COMPACT_H - 10);
+  } catch(e) {}
+}
+function goLoginSize() {
+  try {
+    window.resizeTo(LOGIN_W, LOGIN_H);
+    window.moveTo(screen.availLeft + Math.round((screen.availWidth  - LOGIN_W) / 2),
+                  screen.availTop  + Math.round((screen.availHeight - LOGIN_H) / 2));
+  } catch(e) {}
+}
+
 auth.onAuthStateChanged(user => {
-  if (user) { show('wStatus'); hide('loginScreen'); loadCajas(); }
-  else       { hide('widgetMain'); hide('wStatus'); show('loginScreen'); }
+  if (user) { goCompact(); show('wStatus'); hide('loginScreen'); loadCajas(); }
+  else       { goLoginSize(); hide('widgetMain'); hide('wStatus'); show('loginScreen'); }
 });
 
 async function wLogin() {
@@ -306,6 +324,7 @@ function selectCaja(id, nombre) {
   }, () => {});
   hide('wStatus');
   document.getElementById('widgetMain').style.display = 'flex';
+  goCompact();
   setTimeout(() => document.getElementById('wYapeInput').focus(), 50);
 }
 
