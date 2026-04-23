@@ -67,6 +67,7 @@ let _pipWindow           = null;
 let _unsubscribeSync     = null;
 let _estadoPushTimer     = null;
 let _inactivityTimer     = null;
+let _reportesCache       = [];
 let _warningTimer        = null;
 let _countdownInterval   = null;
 
@@ -83,6 +84,11 @@ let _flujoCharts      = {};
 // ============================================================
 //  INIT
 // ============================================================
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveStateNow();
+});
+window.addEventListener('beforeunload', () => { saveStateNow(); });
+
 window.addEventListener('DOMContentLoaded', () => {
   buildDenomTable('inicial', 'inicialDenomTable');
   buildDenomTable('cierre',  'cierreDenomTable');
@@ -1040,7 +1046,9 @@ async function renderReportes() {
   if (reports.length === 0) { tbody.innerHTML = ''; noData.classList.remove('hidden'); return; }
   noData.classList.add('hidden');
 
-  tbody.innerHTML = reports.map(r => {
+  _reportesCache = reports;
+
+  tbody.innerHTML = reports.map((r, i) => {
     const diffClass = r.diferencia > 0 ? 'diff-pos' : r.diferencia < 0 ? 'diff-neg' : 'diff-zero';
     const diffText  = r.diferencia === 0 ? '✓ Exacto'
       : r.diferencia > 0 ? `+${fmt(r.diferencia)}` : `−${fmt(Math.abs(r.diferencia))}`;
@@ -1050,8 +1058,14 @@ async function renderReportes() {
       <td>${fmt(r.ventasFinal)}</td><td>${fmt(r.totalYapes)}</td>
       <td>${fmt(r.efectivoEsperado)}</td><td>${fmt(r.efectivoReal)}</td>
       <td class="${diffClass}">${diffText}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="descargarReportePDF(${i})">⬇ PDF</button></td>
     </tr>`;
   }).join('');
+}
+
+function descargarReportePDF(idx) {
+  const r = _reportesCache[idx];
+  if (r) generarPDF(r);
 }
 
 function limpiarFiltros() {
@@ -1158,12 +1172,12 @@ function addEvento() {
     fecha:         new Date().toISOString(),
     incluirEnFlujo: currentEventoTipo === 'Egreso' ? (incluirFlujoEl ? incluirFlujoEl.checked : true) : undefined,
   });
-  saveState(); renderEventos(); calcularEsperado(); closeEventosModal();
+  saveStateNow(); renderEventos(); calcularEsperado(); closeEventosModal();
 }
 
 function eliminarEvento(idx) {
   state.eventos.splice(idx, 1);
-  saveState(); renderEventos(); calcularEsperado();
+  saveStateNow(); renderEventos(); calcularEsperado();
 }
 
 function renderEventos() {
