@@ -174,6 +174,7 @@ function _applyRoleUI() {
   document.getElementById('empleadoBadge').classList.toggle('hidden', !isEmp);
   document.getElementById('btnHistorial').classList.toggle('hidden', isEmp);
   document.getElementById('btnFlujo').classList.toggle('hidden', isEmp);
+  document.getElementById('btnReporte').classList.toggle('hidden', isEmp);
   document.getElementById('btnCajas').classList.toggle('hidden', false);
 }
 
@@ -335,7 +336,7 @@ function showView(view) {
   if (userRole === 'employee') { _showEmployeeView(); return; }
   if (view === 'auto') view = state.cajaAbierta ? 'cierre' : 'apertura';
 
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo','viewReporteCaja'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   const cap = view.charAt(0).toUpperCase() + view.slice(1);
@@ -1756,3 +1757,337 @@ function escHtml(str) {
 function tryParseJSON(str, fallback) {
   try { return JSON.parse(str); } catch { return fallback; }
 }
+
+// ============================================================
+//  REPORTE DE CAJA (RC) — integración SAS + aperturas
+// ============================================================
+let _rcDatos      = null;   // último resultado recibido
+let _rcCajaTimes  = [];     // tiempos del portapapeles
+let _rcMsgHandler = null;   // listener postMessage activo
+const SAS_REPORTE_URL = 'https://cheplast.organizatic.com/principal#/reportes/ventas';
+
+function openReporteCaja() {
+  showView('reporteCaja');
+  // Reset visual
+  _rcDatos = null;
+  document.getElementById('rcResultado').style.display = 'none';
+  document.getElementById('rcInstrucciones').style.display = '';
+  _rcSetMsg('Listo. Haz clic en <b>Iniciar Reporte</b> para comenzar.', false);
+}
+
+function _rcSetMsg(html, spinner, spinnerTxt) {
+  document.getElementById('rcMensaje').innerHTML = html;
+  const sp = document.getElementById('rcSpinner');
+  sp.style.display = spinner ? '' : 'none';
+  if (spinnerTxt) document.getElementById('rcSpinnerTxt').textContent = spinnerTxt;
+}
+
+async function iniciarReporteCaja() {
+  document.getElementById('btnIniciarReporte').disabled = true;
+  document.getElementById('rcResultado').style.display = 'none';
+  document.getElementById('rcInstrucciones').style.display = 'none';
+
+  // 1. Leer portapapeles → tiempos de caja
+  _rcCajaTimes = [];
+  try {
+    const txt = await navigator.clipboard.readText();
+    const parsed = JSON.parse(txt);
+    if (Array.isArray(parsed) && parsed.length > 0 && /^\d{2}:\d{2}:\d{2}$/.test(parsed[0])) {
+      _rcCajaTimes = parsed;
+    }
+  } catch (e) { /* sin permiso o no era JSON */ }
+
+  if (_rcCajaTimes.length === 0) {
+    _rcSetMsg('⚠️ No se encontraron datos de caja en el portapapeles.<br>Ejecuta <b>REPORTE CAJA.bat</b> primero y vuelve a intentar.', false);
+    document.getElementById('btnIniciarReporte').disabled = false;
+    return;
+  }
+
+  _rcSetMsg(`✔ ${_rcCajaTimes.length} apertura(s) de caja encontradas. Abriendo SAS…`, true, 'Abriendo SAS…');
+
+  // 2. Escuchar respuesta del bookmarklet
+  if (_rcMsgHandler) window.removeEventListener('message', _rcMsgHandler);
+  _rcMsgHandler = function(ev) {
+    if (!ev.data || ev.data.type !== 'sasReportData') return;
+    window.removeEventListener('message', _rcMsgHandler);
+    _rcMsgHandler = null;
+    _rcProcesarRespuesta(ev.data.payload);
+  };
+  window.addEventListener('message', _rcMsgHandler);
+
+  // 3. Guardar tiempos en localStorage para que el bookmarklet los lea si lo necesita
+  try { localStorage.setItem('caja_hoy_data', JSON.stringify(_rcCajaTimes)); } catch(e) {}
+
+  // 4. Abrir SAS
+  const win = window.open(SAS_REPORTE_URL, 'SAS_Reporte', 'width=1440,height=900,resizable=yes,scrollbars=yes');
+  if (!win) {
+    _rcSetMsg('⚠️ El navegador bloqueó la ventana emergente. Permite ventanas emergentes para este sitio.', false);
+    document.getElementById('btnIniciarReporte').disabled = false;
+    window.removeEventListener('message', _rcMsgHandler);
+    return;
+  }
+  win.focus();
+
+  // 5. Timeout de seguridad (2 min)
+  const timeout = setTimeout(() => {
+    if (!_rcDatos) {
+      window.removeEventListener('message', _rcMsgHandler);
+      _rcSetMsg('⏱ Tiempo de espera agotado. El SAS tardó demasiado o el bookmarklet no está instalado.', false);
+      document.getElementById('btnIniciarReporte').disabled = false;
+    }
+  }, 120000);
+
+  // Guardar timeout para cancelarlo si llegan datos
+  _rcDatos = { _timeout: timeout };
+}
+
+function _rcProcesarRespuesta(payload) {
+  if (_rcDatos && _rcDatos._timeout) clearTimeout(_rcDatos._timeout);
+
+  if (!payload || !payload.ok) {
+    _rcSetMsg('❌ El SAS reportó un error: ' + (payload && payload.error ? payload.error : 'desconocido'), false);
+    document.getElementById('btnIniciarReporte').disabled = false;
+    return;
+  }
+
+  _rcSetMsg('✔ Datos del SAS recibidos. Comparando…', false);
+
+  const { docs, elim, fecha } = payload;
+  // docs: [{tipo, hora?}], elim: [{texto}]
+  const totalDocs = docs.length;
+  const cajaTimes = _rcCajaTimes;
+
+  // Comparar
+  const caja = _rcCompararCaja(cajaTimes, docs, totalDocs);
+
+  _rcDatos = { docs, elim, fecha, cajaTimes, caja, totalDocs };
+  _rcMostrarResultado(_rcDatos);
+  document.getElementById('btnIniciarReporte').disabled = false;
+}
+
+function _rcCompararCaja(cajaTimes, docs, totalDocs) {
+  if (cajaTimes.length === 0) return null;
+
+  function timeToSec(t) {
+    const p = t.split(':').map(Number);
+    return p[0]*3600 + p[1]*60 + (p[2]||0);
+  }
+
+  const docTimes = docs.map(d => d.hora).filter(Boolean);
+
+  if (docTimes.length > 0) {
+    const usadas = new Array(docTimes.length).fill(false);
+    const sinMatch = [];
+    cajaTimes.forEach(ct => {
+      const ctSec = timeToSec(ct);
+      let matched = false;
+      for (let i = 0; i < docTimes.length; i++) {
+        if (usadas[i]) continue;
+        if (Math.abs(ctSec - timeToSec(docTimes[i])) <= 300) {
+          usadas[i] = true; matched = true; break;
+        }
+      }
+      if (!matched) sinMatch.push(ct);
+    });
+    return { modo: 'tiempo', sinMatch };
+  } else {
+    const extras = cajaTimes.length - totalDocs;
+    return { modo: 'conteo', extras };
+  }
+}
+
+function _rcMostrarResultado(d) {
+  const { docs, elim, fecha, cajaTimes, caja, totalDocs } = d;
+
+  // Conteo por tipo
+  const conteo = { FACTURA:0, BOLETA:0, NOTA:0, OTRO:0 };
+  docs.forEach(doc => {
+    const t = (doc.tipo||'').toUpperCase();
+    if      (t.includes('FACTURA')) conteo.FACTURA++;
+    else if (t.includes('BOLETA'))  conteo.BOLETA++;
+    else if (t.includes('NOTA'))    conteo.NOTA++;
+    else                            conteo.OTRO++;
+  });
+
+  let html = `<p style="font-size:14px;font-weight:600;margin:0 0 10px">
+    ✅ Total documentos emitidos: <b>${totalDocs}</b></p>
+    <ul style="margin:0 0 12px;padding-left:22px;color:#2c3e50">`;
+  if (conteo.FACTURA) html += `<li>Facturas: <b>${conteo.FACTURA}</b></li>`;
+  if (conteo.BOLETA)  html += `<li>Boletas: <b>${conteo.BOLETA}</b></li>`;
+  if (conteo.NOTA)    html += `<li>Notas: <b>${conteo.NOTA}</b></li>`;
+  if (conteo.OTRO)    html += `<li>Otros: <b>${conteo.OTRO}</b></li>`;
+  html += `</ul>`;
+
+  html += `<hr style="margin:10px 0;border-color:#eee">
+    <p style="font-size:14px;font-weight:600;margin:0 0 6px">
+    ❌ Documentos eliminados: <b>${elim.length}</b></p>`;
+  if (elim.length > 0) {
+    html += `<ol style="margin:0 0 12px;padding-left:22px;color:#c0392b;font-size:13px">`;
+    elim.forEach(e => { html += `<li style="margin-bottom:3px">${escHtml(e.texto||e)}</li>`; });
+    html += `</ol>`;
+  } else {
+    html += `<p style="color:#27ae60;margin:0 0 12px;font-size:13px">✔ Ningún documento eliminado hoy.</p>`;
+  }
+
+  // Caja
+  html += `<hr style="margin:10px 0;border-color:#eee">`;
+  if (!caja) {
+    html += `<p style="color:#999;font-size:12px">🔒 Sin datos de caja (portapapeles vacío).</p>`;
+  } else if (caja.modo === 'tiempo') {
+    html += `<p style="font-size:13px;font-weight:600;margin:0 0 6px">
+      💰 Aperturas de caja: <b>${cajaTimes.length}</b>
+      <span style="color:#777;font-weight:normal"> / Documentos: ${totalDocs}</span></p>`;
+    if (caja.sinMatch.length === 0) {
+      html += `<p style="color:#27ae60;font-size:13px;margin:0">✔ Todas las aperturas tienen comprobante asociado.</p>`;
+    } else {
+      html += `<p style="color:#e74c3c;font-weight:bold;font-size:13px;margin:0 0 4px">
+        ❌ ${caja.sinMatch.length} apertura(s) SIN comprobante (±5 min):</p>
+        <ol style="margin:0;padding-left:20px;color:#c0392b;font-size:13px">`;
+      caja.sinMatch.forEach(t => { html += `<li>${t}</li>`; });
+      html += `</ol>`;
+    }
+  } else {
+    html += `<p style="font-size:13px;font-weight:600;margin:0 0 6px">
+      💰 Aperturas de caja: <b>${cajaTimes.length}</b>
+      <span style="color:#777;font-weight:normal"> / Documentos: ${totalDocs}</span></p>`;
+    if (caja.extras <= 0) {
+      html += `<p style="color:#27ae60;font-size:13px;margin:0">✔ Las aperturas coinciden con los documentos.</p>`;
+    } else {
+      html += `<p style="color:#e67e22;font-weight:bold;font-size:13px;margin:0 0 4px">
+        ⚠ ${caja.extras} apertura(s) posiblemente sin comprobante.</p>
+        <p style="font-size:11px;color:#999;margin:0">El SAS no devolvió hora por documento. Con hora exacta la comparación sería más precisa.</p>`;
+    }
+  }
+
+  document.getElementById('rcResultadoBody').innerHTML = html;
+  document.getElementById('rcResultado').style.display = '';
+  _rcSetMsg(`✔ Reporte generado — ${fecha}`, false);
+}
+
+async function rcGenerarPDF() {
+  if (!_rcDatos || !_rcDatos.docs) return;
+  await loadScript(JSPDF_URL, JSPDF_SRI);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  const mg = 18;
+
+  const BLUE=[30,58,95], LBLUE=[239,246,255], GREEN=[5,150,105], RED=[220,38,38];
+  const DARK=[26,32,44], GRAY=[100,116,139];
+
+  function newPageIfNeeded(y, need) {
+    if (y + need > ph - 18) { doc.addPage(); return mg; } return y;
+  }
+
+  const { docs, elim, fecha, cajaTimes, caja, totalDocs } = _rcDatos;
+
+  // Encabezado
+  doc.setFillColor(...BLUE); doc.rect(0, 0, pw, 32, 'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('REPORTE DE CAJA — CHE PLAST', pw/2, 13, { align:'center' });
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  doc.text(`Fecha: ${fecha}  |  Generado: ${new Date().toLocaleString('es-PE')}`, pw/2, 22, { align:'center' });
+
+  let y = 40;
+
+  // Documentos emitidos
+  y = pdfSec(doc, 'DOCUMENTOS EMITIDOS HOY', y, pw, mg, BLUE, LBLUE);
+  y = pdfRow(doc, 'Total documentos', String(totalDocs), y, mg, pw, DARK, BLUE);
+  const conteo = { FACTURA:0, BOLETA:0, NOTA:0, OTRO:0 };
+  docs.forEach(d => {
+    const t = (d.tipo||'').toUpperCase();
+    if (t.includes('FACTURA')) conteo.FACTURA++;
+    else if (t.includes('BOLETA')) conteo.BOLETA++;
+    else if (t.includes('NOTA')) conteo.NOTA++;
+    else conteo.OTRO++;
+  });
+  if (conteo.FACTURA) y = pdfRow(doc, 'Facturas', String(conteo.FACTURA), y, mg, pw, DARK, BLUE);
+  if (conteo.BOLETA)  y = pdfRow(doc, 'Boletas',  String(conteo.BOLETA),  y, mg, pw, DARK, BLUE);
+  if (conteo.NOTA)    y = pdfRow(doc, 'Notas',    String(conteo.NOTA),    y, mg, pw, DARK, BLUE);
+  if (conteo.OTRO)    y = pdfRow(doc, 'Otros',    String(conteo.OTRO),    y, mg, pw, DARK, BLUE);
+  y += 5;
+
+  // Eliminados
+  y = newPageIfNeeded(y, 20 + elim.length * 6);
+  y = pdfSec(doc, 'DOCUMENTOS ELIMINADOS', y, pw, mg, BLUE, LBLUE);
+  if (elim.length === 0) {
+    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...GREEN);
+    doc.text('✔ Ningún documento eliminado hoy.', mg + 2, y); y += 8;
+  } else {
+    elim.forEach((e, i) => {
+      y = newPageIfNeeded(y, 8);
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...RED);
+      const txt = doc.splitTextToSize(`${i+1}. ${e.texto||e}`, pw - mg*2 - 4);
+      doc.text(txt, mg + 2, y); y += txt.length * 4.5 + 1.5;
+    }); y += 3;
+  }
+
+  // Aperturas de caja
+  y = newPageIfNeeded(y, 30);
+  y = pdfSec(doc, 'CONTROL DE APERTURAS DE CAJA', y, pw, mg, BLUE, LBLUE);
+  y = pdfRow(doc, 'Aperturas registradas', String(cajaTimes.length), y, mg, pw, DARK, BLUE);
+  y = pdfRow(doc, 'Documentos emitidos',  String(totalDocs),         y, mg, pw, DARK, BLUE);
+
+  if (!caja) {
+    doc.setFont('helvetica','italic'); doc.setFontSize(9); doc.setTextColor(...GRAY);
+    doc.text('Sin datos de caja (portapapeles vacío al iniciar).', mg+2, y+4); y+=10;
+  } else if (caja.modo === 'tiempo') {
+    if (caja.sinMatch.length === 0) {
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...GREEN);
+      doc.text('✔ Todas las aperturas tienen comprobante asociado.', mg+2, y+5); y+=12;
+    } else {
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...RED);
+      doc.text(`❌ ${caja.sinMatch.length} apertura(s) SIN comprobante (±5 min):`, mg+2, y+5); y+=11;
+      caja.sinMatch.forEach(t => {
+        y = newPageIfNeeded(y, 7);
+        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...RED);
+        doc.text(`• ${t}`, mg+6, y); y+=5.5;
+      }); y+=2;
+    }
+  } else {
+    if (caja.extras <= 0) {
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...GREEN);
+      doc.text('✔ Las aperturas coinciden con los documentos.', mg+2, y+5); y+=12;
+    } else {
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(194,65,12);
+      doc.text(`⚠ ${caja.extras} apertura(s) posiblemente sin comprobante.`, mg+2, y+5); y+=11;
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
+      doc.text('El SAS no reportó hora por documento; comparación por conteo.', mg+4, y); y+=8;
+    }
+  }
+
+  // Lista completa de aperturas
+  if (cajaTimes.length > 0) {
+    y = newPageIfNeeded(y, 15 + cajaTimes.length*5);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...DARK);
+    doc.text('Detalle de aperturas:', mg+2, y); y+=5;
+    cajaTimes.forEach((t,i) => {
+      y = newPageIfNeeded(y,6);
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...DARK);
+      doc.text(`${i+1}. ${t}`, mg+6, y); y+=4.5;
+    });
+  }
+
+  // Footer
+  const totalPags = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPags; p++) {
+    doc.setPage(p);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...GRAY);
+    doc.text(`Che plaS — Control de Caja | Página ${p} de ${totalPags}`, pw/2, ph-8, { align:'center' });
+  }
+
+  doc.save(`ReporteCaja_${fecha}.pdf`);
+}
+
+// Escuchar datos del bookmarklet (se registra una sola vez globalmente)
+window.addEventListener('message', function(ev) {
+  if (!ev.data || ev.data.type !== 'sasReportData') return;
+  // Solo actuar si la vista está activa y hay un handler de RC esperando
+  if (_rcMsgHandler) return; // ya lo toma el handler ad-hoc
+  // Si no hay handler ad-hoc (p.ej. ventana ya cerrada) mostrar igualmente
+  if (document.getElementById('viewReporteCaja') &&
+      !document.getElementById('viewReporteCaja').classList.contains('hidden')) {
+    _rcProcesarRespuesta(ev.data.payload);
+  }
+});
