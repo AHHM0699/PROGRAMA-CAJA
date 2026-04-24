@@ -245,15 +245,13 @@ async function _renderCajasLista() {
     const snap  = await db.collection('cajas').get();
     const cajas = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
+      .filter(c => c.cajaAbierta === true && c.aperturaFecha)
       .sort((a, b) => new Date(b.aperturaFecha || 0) - new Date(a.aperturaFecha || 0));
 
     if (cajas.length === 0) {
-      lista.innerHTML = '<p class="no-cajas-msg">No hay cajas abiertas</p>';
-
-      // Empleado sin cajas → mensaje de espera
-      if (userRole === 'employee') {
-        lista.innerHTML = '<p class="no-cajas-msg">⏳ Esperando apertura de caja…</p>';
-      }
+      lista.innerHTML = userRole === 'employee'
+        ? '<p class="no-cajas-msg">⏳ Esperando apertura de caja…</p>'
+        : '';
       return;
     }
 
