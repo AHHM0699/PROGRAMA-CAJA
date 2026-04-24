@@ -1814,19 +1814,67 @@ async function iniciarReporteCaja() {
     return;
   }
 
-  // Caso 2: array simple de tiempos (bat antiguo o sin Brave CDP)
+  // Caso 2: solo cajaTimes — abrir SAS y esperar bookmarklet
   if (Array.isArray(parsed) && parsed.length > 0 && /^\d{2}:\d{2}:\d{2}$/.test(parsed[0])) {
     _rcCajaTimes = parsed;
-    _rcSetMsg(
-      `${parsed.length} apertura(s) encontradas, pero sin datos del SAS.<br>` +
-      `Asegúrate de que Brave esté abierto con el SAS iniciado y vuelve a ejecutar <b>REPORTE CAJA.bat</b>.`,
-      false
-    );
-    document.getElementById('btnIniciarReporte').disabled = false;
+    try { localStorage.setItem('caja_hoy_data', JSON.stringify(parsed)); } catch(e) {}
+    _rcAbrirSasConBookmarklet(parsed.length);
     return;
   }
 
   _rcSetMsg('Datos en portapapeles no reconocidos.<br>Ejecuta <b>REPORTE CAJA.bat</b> y vuelve a intentar.', false);
+  document.getElementById('btnIniciarReporte').disabled = false;
+}
+
+function _rcAbrirSasConBookmarklet(nAperturas) {
+  // Código del bookmarklet (compacto, se inyecta en el SAS via clic del usuario)
+  const bm = `javascript:(function(){var HOY=(function(){var d=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Lima'}));return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();function fill(el,v){var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;s.call(el,v);['input','change','blur'].forEach(function(t){el.dispatchEvent(new Event(t,{bubbles:true}));});}function wait(fn,ms,max){return new Promise(function(res,rej){var e=0,iv=setInterval(function(){var r=fn();if(r){clearInterval(iv);res(r);}else if((e+=ms)>=max){clearInterval(iv);rej('timeout');}},ms);});}var ins=Array.from(document.querySelectorAll('input')).filter(function(i){return /\\d{4}-\\d{2}-\\d{2}/.test(i.value);});if(ins.length<2){alert('Recarga la pagina del SAS e intenta de nuevo.');return;}fill(ins[0],HOY);fill(ins[1],HOY);Array.from(document.querySelectorAll('input[type="checkbox"]')).forEach(function(cb){var l=cb.closest('label')||cb.parentElement||{};if((l.textContent||'').toLowerCase().includes('eliminad')&&!cb.checked)cb.click();});var btn=Array.from(document.querySelectorAll('button')).find(function(b){return b.textContent.trim()==='Procesar';});if(!btn){alert('Boton Procesar no encontrado.');return;}btn.click();wait(function(){var rows=document.querySelectorAll('table tbody tr');return rows.length>0?Array.from(rows):null;},500,25000).then(function(rows){var docs=[],elim=[];rows.forEach(function(row){var txt=row.textContent.toUpperCase();var cells=Array.from(row.querySelectorAll('td')).map(function(c){return c.textContent.trim();});var isDel=row.classList.contains('table-danger')||row.classList.contains('eliminado')||(row.style.textDecoration||'').includes('line-through')||txt.includes('ELIMINAD')||txt.includes('ANULAD');var hora=null;cells.forEach(function(c){if(!hora&&/^\\d{2}:\\d{2}(:\\d{2})?$/.test(c))hora=c;if(!hora){var m=c.match(/\\d{4}-\\d{2}-\\d{2}[T ](\\d{2}:\\d{2}(:\\d{2})?)/);if(m)hora=m[1];}});var tipo=txt.includes('FACTURA')?'FACTURA':txt.includes('BOLETA')?'BOLETA':txt.includes('NOTA')?'NOTA':'OTRO';if(isDel){elim.push({texto:cells.slice(0,5).join(' | '),hora:hora});}else{docs.push({tipo:tipo,hora:hora});}});if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'sasReportData',payload:{ok:true,fecha:HOY,docs:docs,elim:elim}},'*');}}).catch(function(err){if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'sasReportData',payload:{ok:false,error:String(err)}},'*');}});})();`;
+
+  const instrHtml = `
+    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:14px 16px;margin-bottom:14px">
+      <p style="font-weight:700;font-size:13px;margin:0 0 10px;color:#856404">
+        Paso 1 — Instala el bookmarklet (solo la primera vez):</p>
+      <a id="rcBmLink" href="${bm}"
+        style="display:inline-block;padding:8px 16px;background:#1a6b3c;color:#fff;border-radius:6px;
+               font-weight:bold;font-size:13px;text-decoration:none;cursor:grab"
+        draggable="true"
+        onclick="return false">
+        &#128205; Arrastrar a la barra de marcadores
+      </a>
+      <p style="font-size:11px;color:#856404;margin:8px 0 0">
+        Arrastra este botón verde a tu barra de marcadores de Brave.</p>
+    </div>
+    <div style="background:#d1ecf1;border:1px solid #bee5eb;border-radius:8px;padding:14px 16px">
+      <p style="font-weight:700;font-size:13px;margin:0 0 6px;color:#0c5460">
+        Paso 2 — En la ventana del SAS que se acaba de abrir:</p>
+      <p style="font-size:13px;color:#0c5460;margin:0">
+        Haz clic en el marcador <b>"&#128205; Arrastrar a la barra de marcadores"</b> de tu barra.<br>
+        El reporte se completará automáticamente aquí.</p>
+    </div>`;
+
+  _rcSetMsg(
+    `<b>${nAperturas} apertura(s)</b> de caja encontradas. Abre el SAS y sigue los pasos:<br><br>` + instrHtml,
+    false
+  );
+
+  // Escuchar postMessage del bookmarklet
+  if (_rcMsgHandler) window.removeEventListener('message', _rcMsgHandler);
+  _rcMsgHandler = function(ev) {
+    if (!ev.data || ev.data.type !== 'sasReportData') return;
+    window.removeEventListener('message', _rcMsgHandler);
+    _rcMsgHandler = null;
+    _rcProcesarRespuesta(ev.data.payload);
+  };
+  window.addEventListener('message', _rcMsgHandler);
+
+  // Abrir SAS en nueva ventana
+  const win = window.open(
+    'https://cheplast.organizatic.com/principal#/reportes/ventas',
+    'SAS_Reporte',
+    'width=1400,height=860,resizable=yes,scrollbars=yes'
+  );
+  if (win) win.focus();
+
   document.getElementById('btnIniciarReporte').disabled = false;
 }
 
