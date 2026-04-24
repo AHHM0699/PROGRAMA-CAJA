@@ -1,5 +1,5 @@
 // Service Worker — Che plaS Control de Caja
-const CACHE = 'cheplas-v3';
+const CACHE = 'cheplas-v4';
 const BASE  = self.registration.scope;          // ej: https://ahhm0699.github.io/PROGRAMA-CAJA/
 const PRECACHE = [
   BASE,

@@ -1063,9 +1063,15 @@ async function renderReportes() {
   }).join('');
 }
 
-function descargarReportePDF(idx) {
+async function descargarReportePDF(idx) {
   const r = _reportesCache[idx];
-  if (r) generarPDF(r);
+  if (!r) return;
+  try {
+    await generarPDF(r);
+  } catch(e) {
+    console.error('PDF error:', e);
+    alert('Error al generar el PDF: ' + e.message);
+  }
 }
 
 function limpiarFiltros() {
