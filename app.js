@@ -1855,8 +1855,7 @@ function _rcAbrirSasConBookmarklet(nAperturas) {
 
   const win = window.open(
     'https://cheplast.organizatic.com/principal#/reportes/ventas',
-    'SAS_Reporte',
-    'width=1400,height=860,resizable=yes,scrollbars=yes'
+    '_blank'
   );
   if (win) win.focus();
 
