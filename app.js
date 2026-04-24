@@ -1786,59 +1786,48 @@ async function iniciarReporteCaja() {
   document.getElementById('btnIniciarReporte').disabled = true;
   document.getElementById('rcResultado').style.display = 'none';
   document.getElementById('rcInstrucciones').style.display = 'none';
+  _rcSetMsg('Leyendo portapapeles…', true, 'Leyendo datos del REPORTE CAJA.bat…');
 
-  // 1. Leer portapapeles → tiempos de caja
-  _rcCajaTimes = [];
+  let txt = '';
   try {
-    const txt = await navigator.clipboard.readText();
-    const parsed = JSON.parse(txt);
-    if (Array.isArray(parsed) && parsed.length > 0 && /^\d{2}:\d{2}:\d{2}$/.test(parsed[0])) {
-      _rcCajaTimes = parsed;
-    }
-  } catch (e) { /* sin permiso o no era JSON */ }
-
-  if (_rcCajaTimes.length === 0) {
-    _rcSetMsg('⚠️ No se encontraron datos de caja en el portapapeles.<br>Ejecuta <b>REPORTE CAJA.bat</b> primero y vuelve a intentar.', false);
+    txt = await navigator.clipboard.readText();
+  } catch(e) {
+    _rcSetMsg('Sin permiso para leer el portapapeles. Haz clic en la página e intenta de nuevo.', false);
     document.getElementById('btnIniciarReporte').disabled = false;
     return;
   }
 
-  _rcSetMsg(`✔ ${_rcCajaTimes.length} apertura(s) de caja encontradas. Abriendo SAS…`, true, 'Abriendo SAS…');
+  let parsed = null;
+  try { parsed = JSON.parse(txt); } catch(e) {}
 
-  // 2. Escuchar respuesta del bookmarklet
-  if (_rcMsgHandler) window.removeEventListener('message', _rcMsgHandler);
-  _rcMsgHandler = function(ev) {
-    if (!ev.data || ev.data.type !== 'sasReportData') return;
-    window.removeEventListener('message', _rcMsgHandler);
-    _rcMsgHandler = null;
-    _rcProcesarRespuesta(ev.data.payload);
-  };
-  window.addEventListener('message', _rcMsgHandler);
-
-  // 3. Guardar tiempos en localStorage para que el bookmarklet los lea si lo necesita
-  try { localStorage.setItem('caja_hoy_data', JSON.stringify(_rcCajaTimes)); } catch(e) {}
-
-  // 4. Abrir SAS
-  const win = window.open(SAS_REPORTE_URL, 'SAS_Reporte', 'width=1440,height=900,resizable=yes,scrollbars=yes');
-  if (!win) {
-    _rcSetMsg('⚠️ El navegador bloqueó la ventana emergente. Permite ventanas emergentes para este sitio.', false);
+  if (!parsed) {
+    _rcSetMsg('El portapapeles no contiene datos válidos.<br>Ejecuta primero <b>REPORTE CAJA.bat</b> en el escritorio.', false);
     document.getElementById('btnIniciarReporte').disabled = false;
-    window.removeEventListener('message', _rcMsgHandler);
     return;
   }
-  win.focus();
 
-  // 5. Timeout de seguridad (2 min)
-  const timeout = setTimeout(() => {
-    if (!_rcDatos) {
-      window.removeEventListener('message', _rcMsgHandler);
-      _rcSetMsg('⏱ Tiempo de espera agotado. El SAS tardó demasiado o el bookmarklet no está instalado.', false);
-      document.getElementById('btnIniciarReporte').disabled = false;
-    }
-  }, 120000);
+  // Caso 1: JSON combinado {type:'reporteCompleto', cajaTimes, sasData}
+  if (parsed.type === 'reporteCompleto' && parsed.cajaTimes && parsed.sasData) {
+    _rcCajaTimes = parsed.cajaTimes;
+    _rcSetMsg('Procesando datos…', true, 'Comparando aperturas con documentos…');
+    setTimeout(() => _rcProcesarRespuesta(parsed.sasData), 50);
+    return;
+  }
 
-  // Guardar timeout para cancelarlo si llegan datos
-  _rcDatos = { _timeout: timeout };
+  // Caso 2: array simple de tiempos (bat antiguo o sin Brave CDP)
+  if (Array.isArray(parsed) && parsed.length > 0 && /^\d{2}:\d{2}:\d{2}$/.test(parsed[0])) {
+    _rcCajaTimes = parsed;
+    _rcSetMsg(
+      `${parsed.length} apertura(s) encontradas, pero sin datos del SAS.<br>` +
+      `Asegúrate de que Brave esté abierto con el SAS iniciado y vuelve a ejecutar <b>REPORTE CAJA.bat</b>.`,
+      false
+    );
+    document.getElementById('btnIniciarReporte').disabled = false;
+    return;
+  }
+
+  _rcSetMsg('Datos en portapapeles no reconocidos.<br>Ejecuta <b>REPORTE CAJA.bat</b> y vuelve a intentar.', false);
+  document.getElementById('btnIniciarReporte').disabled = false;
 }
 
 function _rcProcesarRespuesta(payload) {
