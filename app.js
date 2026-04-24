@@ -1796,9 +1796,10 @@ function wait(fn,ms,max){return new Promise(function(res,rej){var e=0,iv=setInte
 var ins=Array.from(document.querySelectorAll('input')).filter(function(i){return/^\\d{4}-\\d{2}-\\d{2}$/.test(i.value);});
 if(ins.length<2){ins=Array.from(document.querySelectorAll('input[type="date"]')).slice(0,2);}
 if(ins.length<2){alert('No encontre los campos de fecha. Recarga la pagina del SAS.');return;}
-fill(ins[0],HOY);fill(ins[0],HOY);
-fill(ins[1],HOY);fill(ins[1],HOY);
+fill(ins[0],HOY);fill(ins[1],HOY);
 Array.from(document.querySelectorAll('input[type="checkbox"]')).forEach(function(cb){var l=cb.closest('label')||cb.parentElement||{};if((l.textContent||'').toLowerCase().includes('eliminad')&&!cb.checked)cb.click();});
+// Segundo fill 300ms despues por si Vue necesita un tick para procesar
+setTimeout(function(){fill(ins[0],HOY);fill(ins[1],HOY);},300);
 setTimeout(function(){
   var btn=Array.from(document.querySelectorAll('button')).find(function(b){return b.textContent.trim()==='Procesar';});
   if(!btn){alert('Boton Procesar no encontrado.');return;}
@@ -1817,7 +1818,7 @@ setTimeout(function(){
     });
     if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'sasReportData',payload:{ok:true,fecha:HOY,docs:docs,elim:elim}},'*');}
   }).catch(function(err){if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'sasReportData',payload:{ok:false,error:String(err)}},'*');}});
-},800);
+},1200);
 })();`.replace(/\n/g,'');
   el.href = 'javascript:' + code;
 }
