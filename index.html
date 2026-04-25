@@ -147,14 +147,12 @@
 
       <div class="card card-info">
         <div class="card-head"><h3>Datos de Apertura</h3></div>
-        <div class="card-body">
-          <div class="info-grid" id="resumenGrid"></div>
-          <div class="mt-3">
-            <label class="field-label">Ventas Final (S/.)</label>
-            <div class="input-wrap">
-              <span class="prefix">S/.</span>
-              <input type="number" id="ventasFinal" class="form-control" placeholder="0.00" min="0" step="0.01" oninput="calcularEsperado()">
-            </div>
+        <div class="card-body info-grid">
+          <div id="resumenGrid" style="display:contents"></div>
+          <div class="info-item">
+            <div class="info-label">Ventas Final</div>
+            <input type="number" id="ventasFinal" class="info-val info-input"
+              placeholder="0.00" min="0" step="0.01" oninput="calcularEsperado()">
           </div>
         </div>
       </div>
