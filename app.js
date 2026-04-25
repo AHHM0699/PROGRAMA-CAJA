@@ -426,6 +426,40 @@ function _el(id) {
     (_pipWindow && !_pipWindow.closed && _pipWindow.document.getElementById(id));
 }
 
+// ── Apertura de gaveta POS-D via Web Serial ──────────────────
+let _posPort = null;
+
+async function abrirCajaPOS() {
+  const btn = document.getElementById('btnAbrirCajaPOS');
+  const fb  = document.getElementById('posFeedback');
+  if (btn) btn.disabled = true;
+  if (fb)  fb.textContent = '';
+  try {
+    if (!('serial' in navigator)) {
+      if (fb) fb.textContent = 'Navegador sin soporte. Usa Brave o Chrome.';
+      return;
+    }
+    // Reusar puerto ya autorizado; primera vez pide seleccionar
+    if (!_posPort) {
+      const saved = await navigator.serial.getPorts();
+      _posPort = saved.length > 0 ? saved[0] : await navigator.serial.requestPort();
+    }
+    await _posPort.open({ baudRate: 9600 });
+    const writer = _posPort.writable.getWriter();
+    // ESC/POS: abrir gaveta pin-2 (pulso 25 ms / 250 ms)
+    await writer.write(new Uint8Array([0x1B, 0x70, 0x00, 0x19, 0xFA]));
+    writer.releaseLock();
+    await _posPort.close();
+    _posPort = null;
+    if (fb) { fb.textContent = '✔ Gaveta abierta'; setTimeout(() => { if (fb) fb.textContent = ''; }, 2000); }
+  } catch (e) {
+    _posPort = null;
+    if (e.name !== 'NotFoundError' && fb) fb.textContent = 'Error: ' + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function addEmpYape() {
   const input    = _el('empYapeInput');
   const feedback = _el('empYapeFeedback');
