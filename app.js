@@ -1262,7 +1262,7 @@ function addEvento() {
     usd:           currentEventoTipo === 'Divisa' ? usd : null,
     tc:            currentEventoTipo === 'Divisa' ? tc  : null,
     fecha:         new Date().toISOString(),
-    incluirEnFlujo: currentEventoTipo === 'Egreso' ? (incluirFlujoEl ? incluirFlujoEl.checked : true) : undefined,
+    incluirEnFlujo: currentEventoTipo === 'Egreso' ? (incluirFlujoEl ? incluirFlujoEl.checked : true) : null,
   });
   saveStateNow(); renderEventos(); calcularEsperado(); closeEventosModal();
 }
