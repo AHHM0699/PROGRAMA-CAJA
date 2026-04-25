@@ -1546,22 +1546,23 @@ async function generarPDF(d) {
     y = newPageIfNeeded(y, d.rcRegistros.length*7+20);
     y = pdfSec(doc,'CONTROL DE COMPROBANTES SAS',y,pw,mg,BLUE,LBLUE);
     d.rcRegistros.forEach((r, i) => {
-      const hora  = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
-      const diff  = r.aperturas - r.comprobantes;
-      const color = diff === 0 ? GREEN : diff > 0 ? RED : [29,78,216];
-      const label = diff === 0 ? '✔ OK' : diff > 0 ? `⚠ ${diff} sin comp.` : `ℹ +${Math.abs(diff)} docs`;
-      y = newPageIfNeeded(y, 12);
-      doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
-      const linea1Parts = [];
-      if (r.aperturasBat > 0) linea1Parts.push(`Bat: ${r.aperturasBat}`);
-      if (r.aperturasEmp != null) linea1Parts.push(`Empleado: ${r.aperturasEmp}`);
-      const detalleAp = linea1Parts.length ? ` (${linea1Parts.join(' / ')})` : '';
-      doc.text(`${i+1}. Aperturas: ${r.aperturas}${detalleAp}  /  Comprobantes: ${r.comprobantes}`, mg+2, y);
-      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...color);
-      doc.text(label, pw-mg-2, y, { align:'right' });
+      const hora     = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+      const bat      = r.aperturasBat ?? r.aperturas ?? 0;
+      const emp      = r.aperturasEmp ?? 0;
+      const comp     = r.comprobantes ?? 0;
+      const esperado = comp + emp;
+      const diff     = bat - esperado;
+      const color    = diff === 0 ? GREEN : RED;
+      const label    = diff === 0 ? '✔ Cuadra' : diff > 0 ? `⚠ Faltan ${diff}` : `⚠ Sobran ${Math.abs(diff)}`;
+      y = newPageIfNeeded(y, 14);
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...color);
+      doc.text(`${i+1}. ${label}`, mg+2, y);
       doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
-      doc.text(hora, pw-mg-2, y+4, { align:'right' });
-      doc.setDrawColor(235,235,235); doc.line(mg, y+7, pw-mg, y+7); y+=10;
+      doc.text(hora, pw-mg-2, y, { align:'right' });
+      y += 5;
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...DARK);
+      doc.text(`Bat: ${bat}  =  Comprobantes: ${comp}  +  Empleado: ${emp}${diff !== 0 ? `  (suma: ${esperado})` : ''}`, mg+4, y);
+      doc.setDrawColor(235,235,235); doc.line(mg, y+3, pw-mg, y+3); y+=7;
     }); y+=2;
   }
 
@@ -2100,27 +2101,27 @@ async function iniciarReporteCaja() {
 
   _rcCajaTimes = cajaTimes || [];
 
-  const aperturasEmp = (state.aperturasCaja || []).length;
   const aperturasBat = _rcCajaTimes.length;
+  const aperturasEmp = (state.aperturasCaja || []).length;
 
   // Abrir SAS para que el usuario genere el reporte manualmente
   const win = window.open(SAS_REPORTE_URL, '_blank');
   if (win) win.focus();
 
-  let msg = '';
-  if (aperturasBat > 0) {
-    msg = `✔ Datos del .bat: <b>${aperturasBat}</b> apertura(s). El SAS se abrió — ingresa los comprobantes abajo.`;
-  } else {
-    msg = `El SAS se abrió. No se encontraron datos del .bat — se usarán las aperturas del empleado. Ingresa los comprobantes abajo.`;
+  if (aperturasBat === 0) {
+    _rcSetMsg('No se encontraron datos del .bat en el portapapeles. Ejecuta <b>REPORTE CAJA.bat</b> primero.', false);
+    document.getElementById('rcFormComprobantes').style.display = 'none';
+    btn.disabled = false;
+    return;
   }
-  _rcSetMsg(msg, false);
+
+  _rcSetMsg(`✔ Datos leídos. El SAS se abrió — genera el reporte e ingresa los comprobantes abajo.`, false);
 
   const info = document.getElementById('rcAperturasInfo');
   if (info) {
-    const partes = [];
-    if (aperturasBat > 0) partes.push(`Bat: ${aperturasBat}`);
-    partes.push(`Empleado: ${aperturasEmp}`);
-    info.textContent = `Aperturas registradas — ${partes.join('  |  ')}`;
+    info.innerHTML =
+      `Total aperturas (.bat): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
+      `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
   }
   document.getElementById('rcFormComprobantes').style.display = '';
   const input = document.getElementById('rcInputComprobantes');
@@ -2136,22 +2137,21 @@ function rcRegistrarComprobantes() {
 
   const aperturasBat = (_rcCajaTimes || []).length;
   const aperturasEmp = (state.aperturasCaja || []).length;
-  // Usar bat si disponible, si no el del empleado
-  const aperturas = aperturasBat > 0 ? aperturasBat : aperturasEmp;
+  const esperado     = comprobantes + aperturasEmp;
+  const diff         = aperturasBat - esperado;   // 0 = cuadra
 
   if (!Array.isArray(state.rcRegistros)) state.rcRegistros = [];
-  state.rcRegistros.push({ aperturas, aperturasBat, aperturasEmp, comprobantes, fecha: new Date().toISOString() });
+  state.rcRegistros.push({ aperturasBat, aperturasEmp, comprobantes, fecha: new Date().toISOString() });
   saveState();
   _rcRenderRegistros();
   if (input) input.value = '';
 
-  const diff = aperturas - comprobantes;
   if (diff === 0) {
-    _rcSetMsg(`✔ Aperturas (${aperturas}) coinciden con comprobantes (${comprobantes}).`, false);
+    _rcSetMsg(`✔ Cuadra: ${aperturasBat} bat = ${comprobantes} comprobantes + ${aperturasEmp} empleado.`, false);
   } else if (diff > 0) {
-    _rcSetMsg(`⚠ ${diff} apertura(s) sin comprobante — ${aperturas} aperturas vs ${comprobantes} documentos.`, false);
+    _rcSetMsg(`⚠ Faltan ${diff} — bat: ${aperturasBat}, comprobantes: ${comprobantes}, empleado: ${aperturasEmp} (suma: ${esperado}).`, false);
   } else {
-    _rcSetMsg(`ℹ ${Math.abs(diff)} documento(s) más que aperturas — ${aperturas} aperturas vs ${comprobantes} documentos.`, false);
+    _rcSetMsg(`⚠ Sobran ${Math.abs(diff)} — bat: ${aperturasBat}, comprobantes: ${comprobantes}, empleado: ${aperturasEmp} (suma: ${esperado}).`, false);
   }
 }
 
@@ -2171,27 +2171,31 @@ function _rcRenderRegistros() {
     <div class="card-head"><h3>Registros del día</h3></div>
     <div class="card-body" style="padding:10px 16px">
       ${lista.map((r, i) => {
-        const hora  = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
-        const diff  = r.aperturas - r.comprobantes;
-        const color = diff === 0 ? '#15803d' : diff > 0 ? '#c2410c' : '#1d4ed8';
-        const icon  = diff === 0 ? '✔' : diff > 0 ? '⚠' : 'ℹ';
-        // Detalle de aperturas: bat y/o empleado
-        const detalle = [];
-        if (r.aperturasBat != null && r.aperturasBat > 0) detalle.push(`bat: ${r.aperturasBat}`);
-        if (r.aperturasEmp != null) detalle.push(`empleado: ${r.aperturasEmp}`);
-        const detalleStr = detalle.length ? ` <span style="color:#9ca3af;font-size:11px">(${detalle.join(' / ')})</span>` : '';
-        return `<div style="display:flex;justify-content:space-between;align-items:center;
-                            padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
-          <div style="flex:1;min-width:0">
-            <span style="color:${color};font-weight:700">${icon}</span>
-            <span style="margin-left:6px;color:#374151">
-              <b>${r.aperturas}</b> aperturas${detalleStr} / <b>${r.comprobantes}</b> comprobantes
-            </span>
-            <span style="color:#9ca3af;font-size:11px;margin-left:8px">${hora}</span>
+        const hora     = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+        const bat      = r.aperturasBat ?? r.aperturas ?? 0;
+        const emp      = r.aperturasEmp ?? 0;
+        const comp     = r.comprobantes ?? 0;
+        const esperado = comp + emp;
+        const diff     = bat - esperado;
+        const color    = diff === 0 ? '#15803d' : '#c2410c';
+        const icon     = diff === 0 ? '✔' : '⚠';
+        const estado   = diff === 0
+          ? 'Cuadra'
+          : diff > 0 ? `Faltan ${diff}` : `Sobran ${Math.abs(diff)}`;
+        return `<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <span style="color:${color};font-weight:700">${icon} ${estado}</span>
+              <span style="color:#9ca3af;font-size:11px;margin-left:8px">${hora}</span>
+            </div>
+            <button onclick="rcDeleteRegistro(${i})"
+              style="background:none;border:none;color:#dc2626;cursor:pointer;
+                     font-size:15px;padding:0 4px;line-height:1" title="Eliminar">✕</button>
           </div>
-          <button onclick="rcDeleteRegistro(${i})"
-            style="background:none;border:none;color:#dc2626;cursor:pointer;
-                   font-size:15px;padding:0 4px;line-height:1;flex-shrink:0" title="Eliminar">✕</button>
+          <div style="color:#374151;font-size:12px;margin-top:3px">
+            Bat: <b>${bat}</b> = Comprobantes: <b>${comp}</b> + Empleado: <b>${emp}</b>
+            ${diff !== 0 ? `<span style="color:${color}"> (suma: ${esperado})</span>` : ''}
+          </div>
         </div>`;
       }).join('')}
     </div>
