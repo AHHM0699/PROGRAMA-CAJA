@@ -1239,7 +1239,13 @@ kbd {
 
 .caja-item-name { font-weight: 700; font-size: 15px; color: var(--green-900); }
 .caja-item-meta { font-size: 12px; color: var(--gray-500); margin-top: 3px; }
-.caja-item-arrow { font-size: 18px; color: var(--green-200); flex-shrink: 0; margin-left: 12px; }
+.caja-item-arrow { font-size: 18px; color: var(--green-200); flex-shrink: 0; }
+.btn-caja-del {
+  background: none; border: none; cursor: pointer; font-size: 15px;
+  padding: 4px 6px; border-radius: var(--radius-sm); opacity: .45;
+  line-height: 1; transition: opacity .15s, background .15s;
+}
+.btn-caja-del:hover { opacity: 1; background: var(--red-50); }
 
 .no-cajas-msg { color: var(--gray-400); font-size: 14px; padding: 24px 0 10px; text-align: center; }
 

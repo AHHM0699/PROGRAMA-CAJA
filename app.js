@@ -266,6 +266,7 @@ async function _renderCajasLista() {
       return;
     }
 
+    const isAdmin = userRole === 'admin';
     lista.innerHTML = cajas.map(c => `
       <div class="caja-item" onclick="selectCaja('${c.id}')">
         <div>
@@ -275,12 +276,33 @@ async function _renderCajasLista() {
             &nbsp;·&nbsp; Inicial: ${fmt(c.cajaInicial || 0)}
           </div>
         </div>
-        <div class="caja-item-arrow">›</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          ${isAdmin ? `<button class="btn-caja-del" title="Eliminar caja" onclick="event.stopPropagation();eliminarCajaDeListado('${c.id}')">🗑</button>` : ''}
+          <span class="caja-item-arrow">›</span>
+        </div>
       </div>`).join('');
   } catch (e) {
     lista.innerHTML = '<p style="color:#dc2626;text-align:center">Error cargando cajas</p>';
     console.error(e);
   }
+}
+
+async function eliminarCajaDeListado(cajaId) {
+  if (!confirm('¿Eliminar esta caja?\n\nSe perderán todos sus datos. Esta acción no se puede deshacer.')) return;
+  const ref = db.doc(`cajas/${cajaId}`);
+  let ok = false;
+  try { await ref.delete(); ok = true; } catch (_) {}
+  if (!ok) {
+    try { await ref.set({ eliminada: true, cajaAbierta: false, _ts: Date.now() }, { merge: true }); ok = true; } catch (e) { console.error(e); }
+  }
+  if (!ok) { alert('No se pudo eliminar la caja. Verifica tu conexión.'); return; }
+  // También borrar el borrador de historial si existe
+  try {
+    const snap = await ref.get();
+    const bid = snap.exists && snap.data().historialBorradorId;
+    if (bid) await db.collection('historial').doc(bid).delete().catch(() => {});
+  } catch (_) {}
+  await _renderCajasLista();
 }
 
 async function selectCaja(cajaId) {
