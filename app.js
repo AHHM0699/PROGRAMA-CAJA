@@ -245,6 +245,8 @@ async function _renderCajasLista() {
     const snap  = await db.collection('cajas').get();
     const cajas = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
+      // Ignorar documentos fantasma (sin nombre, sin fecha de apertura, sin monto inicial)
+      .filter(c => c.nombre || c.aperturaFecha || c.cajaInicial > 0 || c.cajaAbierta)
       .sort((a, b) => new Date(b.aperturaFecha || 0) - new Date(a.aperturaFecha || 0));
 
     if (cajas.length === 0) {
