@@ -41,7 +41,7 @@ const DENOMS = [
 const STATE_FIELDS = [
   'cajaAbierta', 'nombre', 'cajaInicial', 'ventasHastaAhora', 'ultimoYape',
   'aperturaFecha', 'inicialMode', 'inicialBreakdown',
-  'eventos', 'yapesRaw', '_ts',
+  'eventos', 'yapesRaw', 'aperturasCaja', '_ts',
 ];
 
 // ============================================================
@@ -52,7 +52,7 @@ function _defaultState() {
     cajaAbierta: false, nombre: '', cajaInicial: 0,
     ventasHastaAhora: 0, ultimoYape: 0, aperturaFecha: null,
     inicialMode: 'monto', inicialBreakdown: null,
-    eventos: [], yapesRaw: '', _ts: 0,
+    eventos: [], yapesRaw: '', aperturasCaja: [], _ts: 0,
   };
 }
 
@@ -373,6 +373,7 @@ function _showEmployeeView() {
         <div class="info-val" style="font-size:12px;line-height:1.4">${fechaStr}</div></div>`;
     renderEventos();
     _renderEmpYapesList();
+    _renderAperturasCaja();
   }
 }
 
@@ -430,16 +431,25 @@ function _el(id) {
 let _posPort = null;
 
 async function abrirCajaPOS() {
-  const btn = document.getElementById('btnAbrirCajaPOS');
-  const fb  = document.getElementById('posFeedback');
+  const btn    = document.getElementById('btnAbrirCajaPOS');
+  const fb     = document.getElementById('posFeedback');
+  const motInp = document.getElementById('posMotivo');
+  const motivo = (motInp?.value || '').trim();
+
+  if (!motivo) {
+    if (motInp) { motInp.focus(); motInp.style.borderColor = '#dc2626'; }
+    if (fb) fb.textContent = 'Escribe el motivo antes de abrir.';
+    return;
+  }
+  if (motInp) motInp.style.borderColor = '';
   if (btn) btn.disabled = true;
   if (fb)  fb.textContent = '';
+
   try {
     if (!('serial' in navigator)) {
       if (fb) fb.textContent = 'Navegador sin soporte. Usa Brave o Chrome.';
       return;
     }
-    // Reusar puerto ya autorizado; primera vez pide seleccionar
     if (!_posPort) {
       const saved = await navigator.serial.getPorts();
       _posPort = saved.length > 0 ? saved[0] : await navigator.serial.requestPort();
@@ -451,13 +461,36 @@ async function abrirCajaPOS() {
     writer.releaseLock();
     await _posPort.close();
     _posPort = null;
-    if (fb) { fb.textContent = '✔ Gaveta abierta'; setTimeout(() => { if (fb) fb.textContent = ''; }, 2000); }
+
+    // Registrar apertura en el state
+    if (!Array.isArray(state.aperturasCaja)) state.aperturasCaja = [];
+    state.aperturasCaja.push({ motivo, fecha: new Date().toISOString() });
+    saveState();
+    _renderAperturasCaja();
+
+    if (motInp) motInp.value = '';
+    if (fb) { fb.textContent = '✔ Gaveta abierta'; setTimeout(() => { if (fb) fb.textContent = ''; }, 2500); }
   } catch (e) {
     _posPort = null;
     if (e.name !== 'NotFoundError' && fb) fb.textContent = 'Error: ' + e.message;
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+function _renderAperturasCaja() {
+  const el = document.getElementById('empAperturasCajaList');
+  if (!el) return;
+  const lista = state.aperturasCaja || [];
+  if (lista.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = lista.map((a, i) => {
+    const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    return `<div style="display:flex;justify-content:space-between;align-items:center;
+                        padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
+      <span style="color:#374151">${i+1}. ${escHtml(a.motivo)}</span>
+      <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
+    </div>`;
+  }).join('');
 }
 
 function addEmpYape() {
@@ -968,7 +1001,7 @@ async function generarArqueo() {
     ultimoYape: state.ultimoYape, aperturaFecha: state.aperturaFecha,
     inicialMode: state.inicialMode, inicialBreakdown: state.inicialBreakdown || null,
     ventasFinal, totalYapes, yapesList, yapesRaw: state.yapesRaw,
-    eventos: state.eventos || [], cierreMode,
+    eventos: state.eventos || [], aperturasCaja: state.aperturasCaja || [], cierreMode,
     cierreBreakdown: cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
     efectivoEsperado, efectivoReal, diferencia,
   };
@@ -991,7 +1024,7 @@ async function cerrarCaja() {
     ultimoYape: state.ultimoYape, aperturaFecha: state.aperturaFecha,
     inicialMode: state.inicialMode, inicialBreakdown: state.inicialBreakdown || null,
     ventasFinal, totalYapes, yapesList, yapesRaw: state.yapesRaw,
-    eventos: state.eventos || [], cierreMode,
+    eventos: state.eventos || [], aperturasCaja: state.aperturasCaja || [], cierreMode,
     cierreBreakdown: cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
     efectivoEsperado, efectivoReal, diferencia,
   };
@@ -1346,6 +1379,19 @@ async function generarPDF(d) {
       doc.setFont('helvetica','bold'); doc.setTextColor(...col);
       doc.text(`${sign} ${fmt(ev.monto)}`, pw-mg-2, y, { align:'right' });
       doc.setDrawColor(235,235,235); doc.line(mg, y+2.5, pw-mg, y+2.5); y+=8;
+    }); y+=2;
+  }
+
+  if (d.aperturasCaja?.length) {
+    y = newPageIfNeeded(y, d.aperturasCaja.length*7+20);
+    y = pdfSec(doc,'APERTURAS DE GAVETA',y,pw,mg,BLUE,LBLUE);
+    d.aperturasCaja.forEach((a, i) => {
+      const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
+      doc.text(`${i+1}. ${a.motivo}`, mg+2, y);
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRAY);
+      doc.text(hora, pw-mg-2, y, { align:'right' });
+      doc.setDrawColor(235,235,235); doc.line(mg, y+2.5, pw-mg, y+2.5); y+=7;
     }); y+=2;
   }
 

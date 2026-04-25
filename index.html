@@ -368,14 +368,23 @@
           <h2>Vista Empleado</h2>
         </div>
 
-        <div style="margin-bottom:14px">
-          <button id="btnAbrirCajaPOS" onclick="abrirCajaPOS()"
-            style="display:flex;align-items:center;gap:8px;background:#1a6b3c;color:#fff;
-                   border:none;border-radius:8px;padding:10px 20px;font-size:14px;
-                   font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.18)">
-            🔓 Abrir gaveta
-          </button>
-          <span id="posFeedback" style="font-size:12px;color:#6b7280;margin-left:4px"></span>
+        <div class="card" style="margin-bottom:18px">
+          <div class="card-head"><h3>🔓 Apertura de gaveta</h3></div>
+          <div class="card-body">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+              <input id="posMotivo" type="text" class="form-control" placeholder="Motivo de apertura…"
+                style="flex:1;border-radius:6px"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();abrirCajaPOS()}">
+              <button id="btnAbrirCajaPOS" onclick="abrirCajaPOS()"
+                style="background:#1a6b3c;color:#fff;border:none;border-radius:8px;
+                       padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;
+                       white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.18)">
+                🔓 Abrir
+              </button>
+            </div>
+            <span id="posFeedback" style="font-size:12px;color:#6b7280"></span>
+            <div id="empAperturasCajaList" style="margin-top:6px"></div>
+          </div>
         </div>
 
         <div class="card card-info">
