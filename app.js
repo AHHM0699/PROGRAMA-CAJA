@@ -427,9 +427,7 @@ function _el(id) {
     (_pipWindow && !_pipWindow.closed && _pipWindow.document.getElementById(id));
 }
 
-// ── Apertura de gaveta POS-D via Web Serial ──────────────────
-let _posPort = null;
-
+// ── Apertura de gaveta POS-D via protocolo cajaabierta:// ────
 async function abrirCajaPOS() {
   const btn    = document.getElementById('btnAbrirCajaPOS');
   const fb     = document.getElementById('posFeedback');
@@ -446,21 +444,13 @@ async function abrirCajaPOS() {
   if (fb)  fb.textContent = '';
 
   try {
-    if (!('serial' in navigator)) {
-      if (fb) fb.textContent = 'Navegador sin soporte. Usa Brave o Chrome.';
-      return;
-    }
-    if (!_posPort) {
-      const saved = await navigator.serial.getPorts();
-      _posPort = saved.length > 0 ? saved[0] : await navigator.serial.requestPort();
-    }
-    await _posPort.open({ baudRate: 9600 });
-    const writer = _posPort.writable.getWriter();
-    // ESC/POS: abrir gaveta pin-2 (pulso 25 ms / 250 ms)
-    await writer.write(new Uint8Array([0x1B, 0x70, 0x00, 0x19, 0xFA]));
-    writer.releaseLock();
-    await _posPort.close();
-    _posPort = null;
+    // Disparar protocolo cajaabierta:// → powershell abrir_gaveta.ps1
+    const a = document.createElement('a');
+    a.href = 'cajaabierta://abrir';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 
     // Registrar apertura en el state
     if (!Array.isArray(state.aperturasCaja)) state.aperturasCaja = [];
@@ -471,8 +461,7 @@ async function abrirCajaPOS() {
     if (motInp) motInp.value = '';
     if (fb) { fb.textContent = '✔ Gaveta abierta'; setTimeout(() => { if (fb) fb.textContent = ''; }, 2500); }
   } catch (e) {
-    _posPort = null;
-    if (e.name !== 'NotFoundError' && fb) fb.textContent = 'Error: ' + e.message;
+    if (fb) fb.textContent = 'Error: ' + e.message;
   } finally {
     if (btn) btn.disabled = false;
   }
