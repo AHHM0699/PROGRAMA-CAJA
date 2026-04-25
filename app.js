@@ -287,8 +287,27 @@ async function _renderCajasLista() {
   }
 }
 
+// Muestra el modal de confirmación de eliminación; devuelve una Promise<boolean>
+let _eliminarResolve = null;
+function _confirmarEliminar(nombre) {
+  return new Promise(resolve => {
+    _eliminarResolve = resolve;
+    const modal = document.getElementById('eliminarConfirmModal');
+    document.getElementById('eliminarCajaNombre').textContent = nombre || 'esta caja';
+    document.getElementById('eliminarConfirmBtn').onclick = () => { modal.classList.add('hidden'); resolve(true); };
+    modal.classList.remove('hidden');
+  });
+}
+function _cancelEliminar() {
+  document.getElementById('eliminarConfirmModal').classList.add('hidden');
+  if (_eliminarResolve) { _eliminarResolve(false); _eliminarResolve = null; }
+}
+
 async function eliminarCajaDeListado(cajaId) {
-  if (!confirm('¿Eliminar esta caja?\n\nSe perderán todos sus datos. Esta acción no se puede deshacer.')) return;
+  // Obtener nombre de la caja para mostrarlo en el modal
+  let cajaNombre = '';
+  try { const s = await db.doc(`cajas/${cajaId}`).get(); cajaNombre = s.exists ? (s.data().nombre || '') : ''; } catch (_) {}
+  if (!await _confirmarEliminar(cajaNombre)) return;
   const ref = db.doc(`cajas/${cajaId}`);
   let ok = false;
   try { await ref.delete(); ok = true; } catch (_) {}
@@ -1141,7 +1160,7 @@ function resetAfterClose() {
 }
 
 async function eliminarCajaActual() {
-  if (!confirm('¿Eliminar esta caja?\n\nSe borrarán todos los datos de la sesión actual (yapes, eventos, etc.). Esta acción no se puede deshacer.')) return;
+  if (!await _confirmarEliminar(state.nombre || currentCajaNombre || '')) return;
 
   stopRealtimeSync();
 

@@ -787,6 +787,26 @@
   </div>
 </div>
 
+<!-- ===== MODAL: CONFIRMAR ELIMINACIÓN ===== -->
+<div id="eliminarConfirmModal" class="modal-overlay hidden" onclick="if(event.target===this)_cancelEliminar()">
+  <div class="modal-box" style="max-width:400px">
+    <div class="modal-head">
+      <h3>🗑 Eliminar caja</h3>
+      <button class="btn-close" onclick="_cancelEliminar()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc">¿Seguro que quieres eliminar <strong id="eliminarCajaNombre">esta caja</strong>?</p>
+      <p style="font-size:13px;color:var(--red-600);background:var(--red-50);border:1px solid var(--red-200);border-radius:var(--radius);padding:10px 14px;margin:0">
+        Se perderán todos los datos (yapes, eventos, etc.). <strong>Esta acción no se puede deshacer.</strong>
+      </p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="_cancelEliminar()">Cancelar</button>
+      <button class="btn btn-danger" id="eliminarConfirmBtn">Sí, eliminar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Inactivity warning (desactivado, se mantiene en DOM por compatibilidad) -->
 <div id="inactivityWarning" class="inactivity-warning hidden">
   <span>⏱ Sesión inactiva — cerrando en <strong><span id="inactivityCountdown">60</span>s</strong></span>
