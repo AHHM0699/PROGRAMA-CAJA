@@ -1335,4 +1335,23 @@ kbd {
   .modal-grid-2 { grid-template-columns: 1fr; }
   .mes-nav-label { min-width: 100px; font-size: 14px; }
   .btn-lg { padding: 12px 24px; font-size: 14px; }
+
+  /* Login / selector: full-screen on mobile — no floating card */
+  #loginScreen, #cajaSelectorScreen {
+    align-items: flex-start;
+    padding: 0;
+  }
+  .login-box, .caja-selector-wrap {
+    min-height: 100svh;
+    border-radius: 0;
+    padding: 56px 20px 32px;
+    max-width: 100%;
+    box-shadow: none;
+  }
+
+  /* Header overflow: hide low-priority buttons, tighten spacing */
+  #btnFlujo, #btnReporte { display: none !important; }
+  .header-right { gap: 4px; }
+  .caja-nombre-badge { max-width: 80px; font-size: 11px; padding: 3px 7px; }
+  .btn-ghost, .btn-outline-white { padding: 5px 8px; font-size: 12px; }
 }
