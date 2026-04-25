@@ -931,17 +931,13 @@ function guardarApertura() {
 }
 
 function renderResumen() {
-  const fechaStr = state.aperturaFecha
-    ? escHtml(new Date(state.aperturaFecha).toLocaleString('es-PE', { timeZone: TZ })) : 'N/A';
   document.getElementById('resumenGrid').innerHTML = `
     <div class="info-item"><div class="info-label">Caja Inicial</div>
       <div class="info-val">${fmt(state.cajaInicial)}</div></div>
     <div class="info-item"><div class="info-label">Ventas hasta ahora</div>
       <div class="info-val">${fmt(state.ventasHastaAhora)}</div></div>
     <div class="info-item"><div class="info-label">Último Yape</div>
-      <div class="info-val">${fmt(state.ultimoYape)}</div></div>
-    <div class="info-item"><div class="info-label">Apertura</div>
-      <div class="info-val" style="font-size:12px;line-height:1.4">${fechaStr}</div></div>`;
+      <div class="info-val">${fmt(state.ultimoYape)}</div></div>`;
 }
 
 function prefillInicialDenoms() {
