@@ -367,70 +367,81 @@
           <h2>Vista Empleado</h2>
         </div>
 
-        <div class="card">
-          <div class="card-head"><h3>🔓 Apertura de gaveta</h3></div>
-          <div class="card-body">
-            <div class="input-group" style="margin-bottom:6px">
-              <input id="posMotivo" type="text" class="form-control" placeholder="Motivo de apertura…"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();abrirCajaPOS()}">
-              <button id="btnAbrirCajaPOS" class="btn-pos" onclick="abrirCajaPOS()">
-                🔓 Abrir
-              </button>
-            </div>
-            <span id="posFeedback" class="feedback-text"></span>
-            <div id="empAperturasCajaList" style="margin-top:6px"></div>
-          </div>
-        </div>
+        <div class="emp-layout">
 
-        <div class="card card-info">
-          <div class="card-head"><h3>Datos de Apertura</h3></div>
-          <div class="card-body">
-            <div class="info-grid" id="empResumenGrid"></div>
-          </div>
-        </div>
+          <!-- ── Columna izquierda ── -->
+          <div class="emp-col-main">
 
-        <div class="eventos-header">
-          <span class="eventos-header-title">Eventos de caja</span>
-          <button class="btn btn-secondary btn-sm" onclick="openEventosModal()">➕ Agregar evento</button>
-        </div>
-        <div id="cardEventosEmp" class="card" style="display:none">
-          <div class="card-head"><h3>📋 Eventos registrados</h3></div>
-          <div class="card-body" id="eventosListEmp"></div>
-        </div>
-
-        <!-- Yapes — solo ingreso, sin historial -->
-        <div id="empYapeCardWrap">
-          <div id="empYapeCard" class="card">
-            <div class="card-head">
-              <h3>💳 Registrar Yape</h3>
-              <button class="btn btn-secondary btn-sm" onclick="openYapesWidget()">💚 Yapes</button>
-            </div>
-            <div class="card-body">
-              <label class="field-label">Monto recibido por Yape</label>
-              <div class="input-group">
-                <div class="input-wrap">
-                  <span class="prefix">S/.</span>
-                  <input type="number" id="empYapeInput" class="form-control"
-                    placeholder="0.00" min="0" step="0.01"
-                    onkeydown="if(event.key==='Enter'){event.preventDefault();addEmpYape()}">
+            <div class="card">
+              <div class="card-head"><h3>🔓 Apertura de gaveta</h3></div>
+              <div class="card-body">
+                <div class="input-group" style="margin-bottom:6px">
+                  <input id="posMotivo" type="text" class="form-control" placeholder="Motivo de apertura…"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();abrirCajaPOS()}">
+                  <button id="btnAbrirCajaPOS" class="btn-pos" onclick="abrirCajaPOS()">
+                    🔓 Abrir
+                  </button>
                 </div>
-                <button class="btn btn-primary" onclick="addEmpYape()">Agregar</button>
+                <span id="posFeedback" class="feedback-text"></span>
+                <div id="empAperturasCajaList" style="margin-top:6px"></div>
               </div>
-              <p id="empYapeFeedback" class="feedback-text"></p>
             </div>
-          </div>
-          <div id="empYapePipPlaceholder" class="pip-placeholder hidden">
-            📌 Widget activo en ventana flotante
-          </div>
-        </div>
 
-        <!-- Historial de Yapes — solo lectura -->
-        <div class="card">
-          <div class="card-head"><h3>💳 Yapes registrados</h3></div>
-          <div class="card-body" id="empYapesListBody">
-            <p style="color:#9ca3af;font-size:13px">No hay yapes registrados aún.</p>
-          </div>
-        </div>
+            <div class="card card-info">
+              <div class="card-head"><h3>Datos de Apertura</h3></div>
+              <div class="card-body">
+                <div class="info-grid" id="empResumenGrid"></div>
+              </div>
+            </div>
+
+            <div class="eventos-header">
+              <span class="eventos-header-title">Eventos de caja</span>
+              <button class="btn btn-secondary btn-sm" onclick="openEventosModal()">➕ Agregar evento</button>
+            </div>
+            <div id="cardEventosEmp" class="card" style="display:none">
+              <div class="card-head"><h3>📋 Eventos registrados</h3></div>
+              <div class="card-body" id="eventosListEmp"></div>
+            </div>
+
+            <!-- Yapes — solo ingreso -->
+            <div id="empYapeCardWrap">
+              <div id="empYapeCard" class="card">
+                <div class="card-head">
+                  <h3>💳 Registrar Yape</h3>
+                  <button class="btn btn-secondary btn-sm" onclick="openYapesWidget()">💚 Yapes</button>
+                </div>
+                <div class="card-body">
+                  <label class="field-label">Monto recibido por Yape</label>
+                  <div class="input-group">
+                    <div class="input-wrap">
+                      <span class="prefix">S/.</span>
+                      <input type="number" id="empYapeInput" class="form-control"
+                        placeholder="0.00" min="0" step="0.01"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();addEmpYape()}">
+                    </div>
+                    <button class="btn btn-primary" onclick="addEmpYape()">Agregar</button>
+                  </div>
+                  <p id="empYapeFeedback" class="feedback-text"></p>
+                </div>
+              </div>
+              <div id="empYapePipPlaceholder" class="pip-placeholder hidden">
+                📌 Widget activo en ventana flotante
+              </div>
+            </div>
+
+          </div><!-- /emp-col-main -->
+
+          <!-- ── Columna derecha: historial yapes ── -->
+          <div class="emp-col-yapes">
+            <div class="card">
+              <div class="card-head"><h3>💳 Yapes registrados</h3></div>
+              <div class="card-body" id="empYapesListBody">
+                <p style="color:#9ca3af;font-size:13px">No hay yapes registrados aún.</p>
+              </div>
+            </div>
+          </div><!-- /emp-col-yapes -->
+
+        </div><!-- /emp-layout -->
       </div>
 
     </div><!-- /viewEmpleado -->
