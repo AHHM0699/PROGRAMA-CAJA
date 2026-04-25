@@ -782,7 +782,7 @@ function getCajaInicial() {
 function getCajaFinal() {
   return cierreMode === 'denom'
     ? getDenomTotal('cierre')
-    : (parseFloat(document.getElementById('cajaFinalExacto').value) || 0);
+    : (parseFloat(document.getElementById('cajaFinalExacto')?.value) || 0);
 }
 
 function getTotalUSD() {
