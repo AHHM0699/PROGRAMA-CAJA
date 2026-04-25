@@ -41,7 +41,7 @@ const DENOMS = [
 const STATE_FIELDS = [
   'cajaAbierta', 'nombre', 'cajaInicial', 'ventasHastaAhora', 'ultimoYape',
   'aperturaFecha', 'inicialMode', 'inicialBreakdown',
-  'eventos', 'yapesRaw', 'aperturasCaja', '_ts', 'historialBorradorId',
+  'eventos', 'yapesRaw', 'aperturasCaja', 'rcRegistros', '_ts', 'historialBorradorId',
 ];
 
 // ============================================================
@@ -52,7 +52,7 @@ function _defaultState() {
     cajaAbierta: false, nombre: '', cajaInicial: 0,
     ventasHastaAhora: 0, ultimoYape: 0, aperturaFecha: null,
     inicialMode: 'monto', inicialBreakdown: null,
-    eventos: [], yapesRaw: '', aperturasCaja: [], _ts: 0,
+    eventos: [], yapesRaw: '', aperturasCaja: [], rcRegistros: [], _ts: 0,
     historialBorradorId: null,
   };
 }
@@ -1077,7 +1077,7 @@ async function generarArqueo() {
     ultimoYape: state.ultimoYape, aperturaFecha: state.aperturaFecha,
     inicialMode: state.inicialMode, inicialBreakdown: state.inicialBreakdown || null,
     ventasFinal, totalYapes, yapesList, yapesRaw: state.yapesRaw,
-    eventos: state.eventos || [], aperturasCaja: state.aperturasCaja || [], cierreMode,
+    eventos: state.eventos || [], aperturasCaja: state.aperturasCaja || [], rcRegistros: state.rcRegistros || [], cierreMode,
     cierreBreakdown: cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
     efectivoEsperado, efectivoReal, diferencia,
   };
@@ -1100,7 +1100,7 @@ async function cerrarCaja() {
     ultimoYape: state.ultimoYape, aperturaFecha: state.aperturaFecha,
     inicialMode: state.inicialMode, inicialBreakdown: state.inicialBreakdown || null,
     ventasFinal, totalYapes, yapesList, yapesRaw: state.yapesRaw,
-    eventos: state.eventos || [], aperturasCaja: state.aperturasCaja || [], cierreMode,
+    eventos: state.eventos || [], aperturasCaja: state.aperturasCaja || [], rcRegistros: state.rcRegistros || [], cierreMode,
     cierreBreakdown: cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
     efectivoEsperado, efectivoReal, diferencia,
   };
@@ -1539,6 +1539,25 @@ async function generarPDF(d) {
       doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRAY);
       doc.text(hora, pw-mg-2, y, { align:'right' });
       doc.setDrawColor(235,235,235); doc.line(mg, y+2.5, pw-mg, y+2.5); y+=7;
+    }); y+=2;
+  }
+
+  if (d.rcRegistros?.length) {
+    y = newPageIfNeeded(y, d.rcRegistros.length*7+20);
+    y = pdfSec(doc,'CONTROL DE COMPROBANTES SAS',y,pw,mg,BLUE,LBLUE);
+    d.rcRegistros.forEach((r, i) => {
+      const hora = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+      const diff  = r.aperturas - r.comprobantes;
+      const color = diff === 0 ? GREEN : diff > 0 ? RED : [29,78,216];
+      const label = diff === 0 ? '✔ OK' : diff > 0 ? `⚠ ${diff} sin comp.` : `ℹ +${Math.abs(diff)} docs`;
+      y = newPageIfNeeded(y, 8);
+      doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
+      doc.text(`${i+1}. Aperturas: ${r.aperturas}  /  Comprobantes: ${r.comprobantes}`, mg+2, y);
+      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...color);
+      doc.text(label, pw-mg-2, y, { align:'right' });
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
+      doc.text(hora, pw-mg-2, y+4, { align:'right' });
+      doc.setDrawColor(235,235,235); doc.line(mg, y+6, pw-mg, y+6); y+=9;
     }); y+=2;
   }
 
@@ -2037,396 +2056,127 @@ function tryParseJSON(str, fallback) {
 }
 
 // ============================================================
-//  REPORTE DE CAJA (RC) — integración SAS + aperturas
+//  REPORTE DE CAJA (RC) — aperturas vs comprobantes SAS
 // ============================================================
-let _rcDatos      = null;   // último resultado recibido
-let _rcCajaTimes  = [];     // tiempos del portapapeles
-let _rcMsgHandler = null;   // listener postMessage activo
+let _rcCajaTimes = [];
 const SAS_REPORTE_URL = 'https://cheplast.organizatic.com/principal#/reportes/ventas';
 
 function openReporteCaja() {
   showView('reporteCaja');
-  _rcDatos = null;
-  document.getElementById('rcResultado').style.display = 'none';
-  document.getElementById('rcInstrucciones').style.display = '';
-  _rcSetMsg('Ejecuta el <b>REPORTE CAJA.bat</b> y luego haz clic en <b>&#9658; Iniciar Reporte</b>.', false);
-  // Asignar href del bookmarklet por JS (único método que los navegadores respetan)
-  _rcSetBookmarklet();
+  document.getElementById('rcFormComprobantes').style.display = 'none';
+  _rcSetMsg('Ejecuta <b>REPORTE CAJA.bat</b> y luego haz clic en <b>&#9658; Iniciar Reporte</b>.', false);
+  _rcRenderRegistros();
 }
 
-function _rcSetBookmarklet() {
-  const el = document.getElementById('rcBookmarklet');
-  if (!el) return;
-  // fill() robusto: focus + native setter + InputEvent + Event en input Y en padre
-  const code = `(function(){
-var HOY=(function(){var d=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Lima'}));return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
-function fill(el,v){
-  el.focus();
-  var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
-  s.call(el,v);
-  el.dispatchEvent(new InputEvent('input',{bubbles:true,data:v}));
-  el.dispatchEvent(new Event('input',{bubbles:true}));
-  el.dispatchEvent(new Event('change',{bubbles:true}));
-  el.dispatchEvent(new Event('blur',{bubbles:true}));
-  if(el.parentElement){el.parentElement.dispatchEvent(new Event('change',{bubbles:true}));}
-}
-function wait(fn,ms,max){return new Promise(function(res,rej){var e=0,iv=setInterval(function(){var r=fn();if(r){clearInterval(iv);res(r);}else if((e+=ms)>=max){clearInterval(iv);rej('timeout');}},ms);});}
-var ins=Array.from(document.querySelectorAll('input')).filter(function(i){return/^\\d{4}-\\d{2}-\\d{2}$/.test(i.value);});
-if(ins.length<2){ins=Array.from(document.querySelectorAll('input[type="date"]')).slice(0,2);}
-if(ins.length<2){alert('No encontre los campos de fecha. Recarga la pagina del SAS.');return;}
-fill(ins[0],HOY);fill(ins[1],HOY);
-Array.from(document.querySelectorAll('input[type="checkbox"]')).forEach(function(cb){var l=cb.closest('label')||cb.parentElement||{};if((l.textContent||'').toLowerCase().includes('eliminad')&&!cb.checked)cb.click();});
-// Segundo fill 300ms despues por si Vue necesita un tick para procesar
-setTimeout(function(){fill(ins[0],HOY);fill(ins[1],HOY);},300);
-setTimeout(function(){
-  var btn=Array.from(document.querySelectorAll('button')).find(function(b){return b.textContent.trim()==='Procesar';});
-  if(!btn){alert('Boton Procesar no encontrado.');return;}
-  btn.click();
-  wait(function(){var rows=document.querySelectorAll('table tbody tr');return rows.length>0?Array.from(rows):null;},500,25000).then(function(rows){
-    var docs=[],elim=[];
-    rows.forEach(function(row){
-      var txt=row.textContent.toUpperCase();
-      var cells=Array.from(row.querySelectorAll('td')).map(function(c){return c.textContent.trim();});
-      var isDel=row.classList.contains('table-danger')||row.classList.contains('eliminado')||(row.style.textDecoration||'').includes('line-through')||txt.includes('ELIMINAD')||txt.includes('ANULAD');
-      var hora=null;
-      cells.forEach(function(c){if(!hora&&/^\\d{2}:\\d{2}(:\\d{2})?$/.test(c))hora=c;if(!hora){var m=c.match(/\\d{4}-\\d{2}-\\d{2}[T ](\\d{2}:\\d{2}(:\\d{2})?)/);if(m)hora=m[1];}});
-      var tipo=txt.includes('FACTURA')?'FACTURA':txt.includes('BOLETA')?'BOLETA':txt.includes('NOTA')?'NOTA':'OTRO';
-      if(isDel){elim.push({texto:cells.slice(0,5).join(' | '),hora:hora});}
-      else{docs.push({tipo:tipo,hora:hora});}
-    });
-    if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'sasReportData',payload:{ok:true,fecha:HOY,docs:docs,elim:elim}},'*');}
-  }).catch(function(err){if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'sasReportData',payload:{ok:false,error:String(err)}},'*');}});
-},1200);
-})();`.replace(/\n/g,'');
-  el.href = 'javascript:' + code;
-}
-
-function _rcSetMsg(html, spinner, spinnerTxt) {
+function _rcSetMsg(html, spinner) {
   document.getElementById('rcMensaje').innerHTML = html;
-  const sp = document.getElementById('rcSpinner');
-  sp.style.display = spinner ? '' : 'none';
-  if (spinnerTxt) document.getElementById('rcSpinnerTxt').textContent = spinnerTxt;
+  document.getElementById('rcSpinner').style.display = spinner ? '' : 'none';
 }
 
 async function iniciarReporteCaja() {
-  document.getElementById('btnIniciarReporte').disabled = true;
-  document.getElementById('rcResultado').style.display = 'none';
-  document.getElementById('rcInstrucciones').style.display = 'none';
-  _rcSetMsg('Leyendo portapapeles…', true, 'Leyendo datos del REPORTE CAJA.bat…');
+  const btn = document.getElementById('btnIniciarReporte');
+  btn.disabled = true;
+  document.getElementById('rcFormComprobantes').style.display = 'none';
+  _rcSetMsg('Leyendo portapapeles…', true);
 
   let txt = '';
   try {
     txt = await navigator.clipboard.readText();
   } catch(e) {
     _rcSetMsg('Sin permiso para leer el portapapeles. Haz clic en la página e intenta de nuevo.', false);
-    document.getElementById('btnIniciarReporte').disabled = false;
+    btn.disabled = false;
     return;
   }
 
   let parsed = null;
   try { parsed = JSON.parse(txt); } catch(e) {}
 
-  if (!parsed) {
+  // Aceptar array de HH:MM:SS o {cajaTimes:[...], ...}
+  let cajaTimes = null;
+  if (Array.isArray(parsed) && parsed.length > 0 && /^\d{2}:\d{2}(:\d{2})?$/.test(parsed[0])) {
+    cajaTimes = parsed;
+  } else if (parsed?.cajaTimes && Array.isArray(parsed.cajaTimes)) {
+    cajaTimes = parsed.cajaTimes;
+  }
+
+  if (!cajaTimes) {
     _rcSetMsg('El portapapeles no contiene datos válidos.<br>Ejecuta primero <b>REPORTE CAJA.bat</b> en el escritorio.', false);
-    document.getElementById('btnIniciarReporte').disabled = false;
+    btn.disabled = false;
     return;
   }
 
-  // Caso 1: JSON combinado {type:'reporteCompleto', cajaTimes, sasData}
-  if (parsed.type === 'reporteCompleto' && parsed.cajaTimes && parsed.sasData) {
-    _rcCajaTimes = parsed.cajaTimes;
-    _rcSetMsg('Procesando datos…', true, 'Comparando aperturas con documentos…');
-    setTimeout(() => _rcProcesarRespuesta(parsed.sasData), 50);
-    return;
-  }
+  _rcCajaTimes = cajaTimes;
 
-  // Caso 2: solo cajaTimes — abrir SAS y esperar bookmarklet
-  if (Array.isArray(parsed) && parsed.length > 0 && /^\d{2}:\d{2}:\d{2}$/.test(parsed[0])) {
-    _rcCajaTimes = parsed;
-    try { localStorage.setItem('caja_hoy_data', JSON.stringify(parsed)); } catch(e) {}
-    _rcAbrirSasConBookmarklet(parsed.length);
-    return;
-  }
-
-  _rcSetMsg('Datos en portapapeles no reconocidos.<br>Ejecuta <b>REPORTE CAJA.bat</b> y vuelve a intentar.', false);
-  document.getElementById('btnIniciarReporte').disabled = false;
-}
-
-function _rcAbrirSasConBookmarklet(nAperturas) {
-  _rcSetMsg(
-    `<b>${nAperturas} apertura(s)</b> de caja encontradas.<br><br>` +
-    `<span style="color:#0c5460">El SAS se abrió en una ventana nueva.<br>` +
-    `Haz clic en el marcador <b>&#128205; Reporte Caja</b> de tu barra de marcadores<br>` +
-    `para completar el reporte automáticamente.</span>`,
-    false
-  );
-
-  // Escuchar postMessage del bookmarklet
-  if (_rcMsgHandler) window.removeEventListener('message', _rcMsgHandler);
-  _rcMsgHandler = function(ev) {
-    if (!ev.data || ev.data.type !== 'sasReportData') return;
-    window.removeEventListener('message', _rcMsgHandler);
-    _rcMsgHandler = null;
-    _rcProcesarRespuesta(ev.data.payload);
-  };
-  window.addEventListener('message', _rcMsgHandler);
-
-  const win = window.open(
-    'https://cheplast.organizatic.com/principal#/reportes/ventas',
-    '_blank'
-  );
+  // Abrir SAS para que el usuario genere el reporte manualmente
+  const win = window.open(SAS_REPORTE_URL, '_blank');
   if (win) win.focus();
 
-  document.getElementById('btnIniciarReporte').disabled = false;
+  _rcSetMsg(`✔ ${cajaTimes.length} apertura(s) encontradas. El SAS se abrió — genera el reporte allí e ingresa los comprobantes abajo.`, false);
+
+  document.getElementById('rcAperturasInfo').textContent = `Aperturas de gaveta registradas: ${cajaTimes.length}`;
+  document.getElementById('rcFormComprobantes').style.display = '';
+  const input = document.getElementById('rcInputComprobantes');
+  if (input) { input.value = ''; input.focus(); }
+
+  btn.disabled = false;
 }
 
-function _rcProcesarRespuesta(payload) {
-  if (_rcDatos && _rcDatos._timeout) clearTimeout(_rcDatos._timeout);
+function rcRegistrarComprobantes() {
+  const input = document.getElementById('rcInputComprobantes');
+  const comprobantes = parseInt(input?.value, 10);
+  if (isNaN(comprobantes) || comprobantes < 0) { if (input) input.focus(); return; }
 
-  if (!payload || !payload.ok) {
-    _rcSetMsg('❌ El SAS reportó un error: ' + (payload && payload.error ? payload.error : 'desconocido'), false);
-    document.getElementById('btnIniciarReporte').disabled = false;
-    return;
-  }
+  const aperturas = (_rcCajaTimes || []).length;
+  if (!Array.isArray(state.rcRegistros)) state.rcRegistros = [];
+  state.rcRegistros.push({ aperturas, comprobantes, fecha: new Date().toISOString() });
+  saveState();
+  _rcRenderRegistros();
+  if (input) input.value = '';
 
-  _rcSetMsg('✔ Datos del SAS recibidos. Comparando…', false);
-
-  const { docs, elim, fecha } = payload;
-  // docs: [{tipo, hora?}], elim: [{texto}]
-  const totalDocs = docs.length;
-  const cajaTimes = _rcCajaTimes;
-
-  // Comparar
-  const caja = _rcCompararCaja(cajaTimes, docs, totalDocs);
-
-  _rcDatos = { docs, elim, fecha, cajaTimes, caja, totalDocs };
-  _rcMostrarResultado(_rcDatos);
-  document.getElementById('btnIniciarReporte').disabled = false;
-}
-
-function _rcCompararCaja(cajaTimes, docs, totalDocs) {
-  if (cajaTimes.length === 0) return null;
-
-  function timeToSec(t) {
-    const p = t.split(':').map(Number);
-    return p[0]*3600 + p[1]*60 + (p[2]||0);
-  }
-
-  const docTimes = docs.map(d => d.hora).filter(Boolean);
-
-  if (docTimes.length > 0) {
-    const usadas = new Array(docTimes.length).fill(false);
-    const sinMatch = [];
-    cajaTimes.forEach(ct => {
-      const ctSec = timeToSec(ct);
-      let matched = false;
-      for (let i = 0; i < docTimes.length; i++) {
-        if (usadas[i]) continue;
-        if (Math.abs(ctSec - timeToSec(docTimes[i])) <= 300) {
-          usadas[i] = true; matched = true; break;
-        }
-      }
-      if (!matched) sinMatch.push(ct);
-    });
-    return { modo: 'tiempo', sinMatch };
+  const diff = aperturas - comprobantes;
+  if (diff === 0) {
+    _rcSetMsg(`✔ Aperturas (${aperturas}) coinciden con comprobantes (${comprobantes}).`, false);
+  } else if (diff > 0) {
+    _rcSetMsg(`⚠ ${diff} apertura(s) sin comprobante — ${aperturas} aperturas vs ${comprobantes} documentos.`, false);
   } else {
-    const extras = cajaTimes.length - totalDocs;
-    return { modo: 'conteo', extras };
+    _rcSetMsg(`ℹ ${Math.abs(diff)} documento(s) más que aperturas — ${aperturas} aperturas vs ${comprobantes} documentos.`, false);
   }
 }
 
-function _rcMostrarResultado(d) {
-  const { docs, elim, fecha, cajaTimes, caja, totalDocs } = d;
-
-  // Conteo por tipo
-  const conteo = { FACTURA:0, BOLETA:0, NOTA:0, OTRO:0 };
-  docs.forEach(doc => {
-    const t = (doc.tipo||'').toUpperCase();
-    if      (t.includes('FACTURA')) conteo.FACTURA++;
-    else if (t.includes('BOLETA'))  conteo.BOLETA++;
-    else if (t.includes('NOTA'))    conteo.NOTA++;
-    else                            conteo.OTRO++;
-  });
-
-  let html = `<p style="font-size:14px;font-weight:600;margin:0 0 10px">
-    ✅ Total documentos emitidos: <b>${totalDocs}</b></p>
-    <ul style="margin:0 0 12px;padding-left:22px;color:#2c3e50">`;
-  if (conteo.FACTURA) html += `<li>Facturas: <b>${conteo.FACTURA}</b></li>`;
-  if (conteo.BOLETA)  html += `<li>Boletas: <b>${conteo.BOLETA}</b></li>`;
-  if (conteo.NOTA)    html += `<li>Notas: <b>${conteo.NOTA}</b></li>`;
-  if (conteo.OTRO)    html += `<li>Otros: <b>${conteo.OTRO}</b></li>`;
-  html += `</ul>`;
-
-  html += `<hr style="margin:10px 0;border-color:#eee">
-    <p style="font-size:14px;font-weight:600;margin:0 0 6px">
-    ❌ Documentos eliminados: <b>${elim.length}</b></p>`;
-  if (elim.length > 0) {
-    html += `<ol style="margin:0 0 12px;padding-left:22px;color:#c0392b;font-size:13px">`;
-    elim.forEach(e => { html += `<li style="margin-bottom:3px">${escHtml(e.texto||e)}</li>`; });
-    html += `</ol>`;
-  } else {
-    html += `<p style="color:#27ae60;margin:0 0 12px;font-size:13px">✔ Ningún documento eliminado hoy.</p>`;
-  }
-
-  // Caja
-  html += `<hr style="margin:10px 0;border-color:#eee">`;
-  if (!caja) {
-    html += `<p style="color:#999;font-size:12px">🔒 Sin datos de caja (portapapeles vacío).</p>`;
-  } else if (caja.modo === 'tiempo') {
-    html += `<p style="font-size:13px;font-weight:600;margin:0 0 6px">
-      💰 Aperturas de caja: <b>${cajaTimes.length}</b>
-      <span style="color:#777;font-weight:normal"> / Documentos: ${totalDocs}</span></p>`;
-    if (caja.sinMatch.length === 0) {
-      html += `<p style="color:#27ae60;font-size:13px;margin:0">✔ Todas las aperturas tienen comprobante asociado.</p>`;
-    } else {
-      html += `<p style="color:#e74c3c;font-weight:bold;font-size:13px;margin:0 0 4px">
-        ❌ ${caja.sinMatch.length} apertura(s) SIN comprobante (±5 min):</p>
-        <ol style="margin:0;padding-left:20px;color:#c0392b;font-size:13px">`;
-      caja.sinMatch.forEach(t => { html += `<li>${t}</li>`; });
-      html += `</ol>`;
-    }
-  } else {
-    html += `<p style="font-size:13px;font-weight:600;margin:0 0 6px">
-      💰 Aperturas de caja: <b>${cajaTimes.length}</b>
-      <span style="color:#777;font-weight:normal"> / Documentos: ${totalDocs}</span></p>`;
-    if (caja.extras <= 0) {
-      html += `<p style="color:#27ae60;font-size:13px;margin:0">✔ Las aperturas coinciden con los documentos.</p>`;
-    } else {
-      html += `<p style="color:#e67e22;font-weight:bold;font-size:13px;margin:0 0 4px">
-        ⚠ ${caja.extras} apertura(s) posiblemente sin comprobante.</p>
-        <p style="font-size:11px;color:#999;margin:0">El SAS no devolvió hora por documento. Con hora exacta la comparación sería más precisa.</p>`;
-    }
-  }
-
-  document.getElementById('rcResultadoBody').innerHTML = html;
-  document.getElementById('rcResultado').style.display = '';
-  _rcSetMsg(`✔ Reporte generado — ${fecha}`, false);
+function rcDeleteRegistro(i) {
+  if (!Array.isArray(state.rcRegistros)) return;
+  state.rcRegistros.splice(i, 1);
+  saveState();
+  _rcRenderRegistros();
 }
 
-async function rcGenerarPDF() {
-  if (!_rcDatos || !_rcDatos.docs) return;
-  await loadScript(JSPDF_URL, JSPDF_SRI);
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pw = doc.internal.pageSize.getWidth();
-  const ph = doc.internal.pageSize.getHeight();
-  const mg = 18;
-
-  const BLUE=[30,58,95], LBLUE=[239,246,255], GREEN=[5,150,105], RED=[220,38,38];
-  const DARK=[26,32,44], GRAY=[100,116,139];
-
-  function newPageIfNeeded(y, need) {
-    if (y + need > ph - 18) { doc.addPage(); return mg; } return y;
-  }
-
-  const { docs, elim, fecha, cajaTimes, caja, totalDocs } = _rcDatos;
-
-  // Encabezado
-  doc.setFillColor(...BLUE); doc.rect(0, 0, pw, 32, 'F');
-  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(16);
-  doc.text('REPORTE DE CAJA — CHE PLAST', pw/2, 13, { align:'center' });
-  doc.setFont('helvetica','normal'); doc.setFontSize(9);
-  doc.text(`Fecha: ${fecha}  |  Generado: ${new Date().toLocaleString('es-PE')}`, pw/2, 22, { align:'center' });
-
-  let y = 40;
-
-  // Documentos emitidos
-  y = pdfSec(doc, 'DOCUMENTOS EMITIDOS HOY', y, pw, mg, BLUE, LBLUE);
-  y = pdfRow(doc, 'Total documentos', String(totalDocs), y, mg, pw, DARK, BLUE);
-  const conteo = { FACTURA:0, BOLETA:0, NOTA:0, OTRO:0 };
-  docs.forEach(d => {
-    const t = (d.tipo||'').toUpperCase();
-    if (t.includes('FACTURA')) conteo.FACTURA++;
-    else if (t.includes('BOLETA')) conteo.BOLETA++;
-    else if (t.includes('NOTA')) conteo.NOTA++;
-    else conteo.OTRO++;
-  });
-  if (conteo.FACTURA) y = pdfRow(doc, 'Facturas', String(conteo.FACTURA), y, mg, pw, DARK, BLUE);
-  if (conteo.BOLETA)  y = pdfRow(doc, 'Boletas',  String(conteo.BOLETA),  y, mg, pw, DARK, BLUE);
-  if (conteo.NOTA)    y = pdfRow(doc, 'Notas',    String(conteo.NOTA),    y, mg, pw, DARK, BLUE);
-  if (conteo.OTRO)    y = pdfRow(doc, 'Otros',    String(conteo.OTRO),    y, mg, pw, DARK, BLUE);
-  y += 5;
-
-  // Eliminados
-  y = newPageIfNeeded(y, 20 + elim.length * 6);
-  y = pdfSec(doc, 'DOCUMENTOS ELIMINADOS', y, pw, mg, BLUE, LBLUE);
-  if (elim.length === 0) {
-    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...GREEN);
-    doc.text('✔ Ningún documento eliminado hoy.', mg + 2, y); y += 8;
-  } else {
-    elim.forEach((e, i) => {
-      y = newPageIfNeeded(y, 8);
-      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...RED);
-      const txt = doc.splitTextToSize(`${i+1}. ${e.texto||e}`, pw - mg*2 - 4);
-      doc.text(txt, mg + 2, y); y += txt.length * 4.5 + 1.5;
-    }); y += 3;
-  }
-
-  // Aperturas de caja
-  y = newPageIfNeeded(y, 30);
-  y = pdfSec(doc, 'CONTROL DE APERTURAS DE CAJA', y, pw, mg, BLUE, LBLUE);
-  y = pdfRow(doc, 'Aperturas registradas', String(cajaTimes.length), y, mg, pw, DARK, BLUE);
-  y = pdfRow(doc, 'Documentos emitidos',  String(totalDocs),         y, mg, pw, DARK, BLUE);
-
-  if (!caja) {
-    doc.setFont('helvetica','italic'); doc.setFontSize(9); doc.setTextColor(...GRAY);
-    doc.text('Sin datos de caja (portapapeles vacío al iniciar).', mg+2, y+4); y+=10;
-  } else if (caja.modo === 'tiempo') {
-    if (caja.sinMatch.length === 0) {
-      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...GREEN);
-      doc.text('✔ Todas las aperturas tienen comprobante asociado.', mg+2, y+5); y+=12;
-    } else {
-      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...RED);
-      doc.text(`❌ ${caja.sinMatch.length} apertura(s) SIN comprobante (±5 min):`, mg+2, y+5); y+=11;
-      caja.sinMatch.forEach(t => {
-        y = newPageIfNeeded(y, 7);
-        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...RED);
-        doc.text(`• ${t}`, mg+6, y); y+=5.5;
-      }); y+=2;
-    }
-  } else {
-    if (caja.extras <= 0) {
-      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...GREEN);
-      doc.text('✔ Las aperturas coinciden con los documentos.', mg+2, y+5); y+=12;
-    } else {
-      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(194,65,12);
-      doc.text(`⚠ ${caja.extras} apertura(s) posiblemente sin comprobante.`, mg+2, y+5); y+=11;
-      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
-      doc.text('El SAS no reportó hora por documento; comparación por conteo.', mg+4, y); y+=8;
-    }
-  }
-
-  // Lista completa de aperturas
-  if (cajaTimes.length > 0) {
-    y = newPageIfNeeded(y, 15 + cajaTimes.length*5);
-    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...DARK);
-    doc.text('Detalle de aperturas:', mg+2, y); y+=5;
-    cajaTimes.forEach((t,i) => {
-      y = newPageIfNeeded(y,6);
-      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...DARK);
-      doc.text(`${i+1}. ${t}`, mg+6, y); y+=4.5;
-    });
-  }
-
-  // Footer
-  const totalPags = doc.internal.getNumberOfPages();
-  for (let p = 1; p <= totalPags; p++) {
-    doc.setPage(p);
-    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...GRAY);
-    doc.text(`Che plaS — Control de Caja | Página ${p} de ${totalPags}`, pw/2, ph-8, { align:'center' });
-  }
-
-  doc.save(`ReporteCaja_${fecha}.pdf`);
+function _rcRenderRegistros() {
+  const el = document.getElementById('rcRegistrosList');
+  if (!el) return;
+  const lista = state.rcRegistros || [];
+  if (lista.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="card" style="margin-bottom:18px">
+    <div class="card-head"><h3>Registros del día</h3></div>
+    <div class="card-body" style="padding:10px 16px">
+      ${lista.map((r, i) => {
+        const hora = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+        const diff = r.aperturas - r.comprobantes;
+        const color = diff === 0 ? '#15803d' : diff > 0 ? '#c2410c' : '#1d4ed8';
+        const icon  = diff === 0 ? '✔' : diff > 0 ? '⚠' : 'ℹ';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;
+                            padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
+          <div>
+            <span style="color:${color};font-weight:700">${icon}</span>
+            <span style="margin-left:6px;color:#374151">
+              <b>${r.aperturas}</b> aperturas / <b>${r.comprobantes}</b> comprobantes
+            </span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:8px">${hora}</span>
+          </div>
+          <button onclick="rcDeleteRegistro(${i})"
+            style="background:none;border:none;color:#dc2626;cursor:pointer;
+                   font-size:15px;padding:0 4px;line-height:1" title="Eliminar">✕</button>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
 }
-
-// Escuchar datos del bookmarklet (se registra una sola vez globalmente)
-window.addEventListener('message', function(ev) {
-  if (!ev.data || ev.data.type !== 'sasReportData') return;
-  // Solo actuar si la vista está activa y hay un handler de RC esperando
-  if (_rcMsgHandler) return; // ya lo toma el handler ad-hoc
-  // Si no hay handler ad-hoc (p.ej. ventana ya cerrada) mostrar igualmente
-  if (document.getElementById('viewReporteCaja') &&
-      !document.getElementById('viewReporteCaja').classList.contains('hidden')) {
-    _rcProcesarRespuesta(ev.data.payload);
-  }
-});
