@@ -830,6 +830,19 @@ function guardarApertura() {
   currentCajaId = newRef.id;
   newRef.set(_stateToDoc()).catch(e => console.error('Error creando caja:', e));
 
+  // Guardar apertura en historial
+  historialCol.add({
+    tipo:            'apertura',
+    fecha:           state.aperturaFecha,
+    cajaId:          newRef.id,
+    cajaNombre:      nombre,
+    cajaInicial:     state.cajaInicial,
+    inicialMode:     state.inicialMode,
+    inicialBreakdown: state.inicialBreakdown || null,
+    ventasHastaAhora: state.ventasHastaAhora,
+    ultimoYape:      state.ultimoYape,
+  }).catch(e => console.warn('Error guardando apertura en historial:', e));
+
   startRealtimeSync();
   _updateCajaHeader();
   showView('cierre');
@@ -1108,16 +1121,30 @@ async function renderReportes() {
   _reportesCache = reports;
 
   tbody.innerHTML = reports.map((r, i) => {
+    const fechaStr = new Date(r.fecha).toLocaleString('es-PE');
+    const nombreHtml = r.cajaNombre ? `<br><small style="color:#6b7280">${escHtml(r.cajaNombre)}</small>` : '';
+    const pdfBtn = `<button class="btn btn-secondary btn-sm" onclick="descargarReportePDF(${i})">⬇ PDF</button>`;
+
+    if (r.tipo === 'apertura') {
+      return `<tr style="background:#f0fdf4">
+        <td>${fechaStr}${nombreHtml}<br><span style="font-size:11px;font-weight:700;color:#16a34a;background:#dcfce7;padding:1px 6px;border-radius:4px">APERTURA</span></td>
+        <td>${fmt(r.cajaInicial)}</td>
+        <td>${fmt(r.ventasHastaAhora)}</td>
+        <td colspan="5" style="color:#6b7280;font-size:12px;text-align:center">— Reporte de apertura —</td>
+        <td>${pdfBtn}</td>
+      </tr>`;
+    }
+
     const diffClass = r.diferencia > 0 ? 'diff-pos' : r.diferencia < 0 ? 'diff-neg' : 'diff-zero';
     const diffText  = r.diferencia === 0 ? '✓ Exacto'
       : r.diferencia > 0 ? `+${fmt(r.diferencia)}` : `−${fmt(Math.abs(r.diferencia))}`;
     return `<tr>
-      <td>${new Date(r.fecha).toLocaleString('es-PE')}${r.cajaNombre ? `<br><small style="color:#6b7280">${escHtml(r.cajaNombre)}</small>` : ''}</td>
+      <td>${fechaStr}${nombreHtml}</td>
       <td>${fmt(r.cajaInicial)}</td><td>${fmt(r.ventasHastaAhora)}</td>
       <td>${fmt(r.ventasFinal)}</td><td>${fmt(r.totalYapes)}</td>
       <td>${fmt(r.efectivoEsperado)}</td><td>${fmt(r.efectivoReal)}</td>
       <td class="${diffClass}">${diffText}</td>
-      <td><button class="btn btn-secondary btn-sm" onclick="descargarReportePDF(${i})">⬇ PDF</button></td>
+      <td>${pdfBtn}</td>
     </tr>`;
   }).join('');
 }
@@ -1306,6 +1333,7 @@ function _renderEventosInto(cardId, listId) {
 //  PDF GENERATION
 // ============================================================
 async function generarPDF(d) {
+  if (d.tipo === 'apertura') { await _generarPDFApertura(d); return; }
   await loadScript(JSPDF_URL, JSPDF_SRI);
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -1446,6 +1474,55 @@ async function generarPDF(d) {
   const prefix = d.arqueo ? 'Arqueo' : 'Cierre';
   const hora   = new Date(d.fecha).toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}).replace(':','-');
   doc.save(`${prefix}_${(d.cajaNombre||'Caja').replace(/\s+/g,'_')}_${new Date(d.fecha).toLocaleDateString('es-PE').replace(/\//g,'-')}_${hora}.pdf`);
+}
+
+async function _generarPDFApertura(d) {
+  await loadScript(JSPDF_URL, JSPDF_SRI);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pw = doc.internal.pageSize.getWidth();
+  const mg = 18;
+  const BLUE=[30,58,95], LBLUE=[239,246,255], DARK=[26,32,44], GRAY=[100,116,139], GREEN_DARK=[20,83,45];
+
+  doc.setFillColor(...GREEN_DARK); doc.rect(0, 0, pw, 32, 'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('REPORTE DE APERTURA DE CAJA', pw/2, 14, { align:'center' });
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
+  doc.text(`${new Date(d.fecha).toLocaleDateString('es-PE',opts)}  |  ${new Date(d.fecha).toLocaleTimeString('es-PE')}`, pw/2, 22, { align:'center' });
+  if (d.cajaNombre) { doc.setFontSize(8); doc.text(`Caja: ${d.cajaNombre}`, pw/2, 28, { align:'center' }); }
+
+  let y = 40;
+  y = pdfSec(doc,'DATOS DE APERTURA',y,pw,mg,BLUE,LBLUE);
+  y = pdfRow(doc,'Nombre de caja', d.cajaNombre||'—', y,mg,pw,DARK,BLUE);
+  y = pdfRow(doc,'Fecha y hora',   new Date(d.fecha).toLocaleString('es-PE'), y,mg,pw,DARK,BLUE);
+  y = pdfRow(doc,'Caja Inicial',   fmt(d.cajaInicial), y,mg,pw,DARK,BLUE);
+  if (d.ventasHastaAhora) y = pdfRow(doc,'Ventas hasta ahora', fmt(d.ventasHastaAhora), y,mg,pw,DARK,BLUE);
+  if (d.ultimoYape)       y = pdfRow(doc,'Último Yape',        fmt(d.ultimoYape),        y,mg,pw,DARK,BLUE);
+  y += 4;
+
+  if (d.inicialMode === 'denom' && d.inicialBreakdown?.length) {
+    y = pdfSec(doc,'DETALLE DENOMINACIONES — CAJA INICIAL',y,pw,mg,BLUE,LBLUE);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRAY);
+    d.inicialBreakdown.forEach(item => {
+      doc.text(`${item.label}  ×  ${item.qty}  =  S/. ${item.subtotal.toFixed(2)}`, mg+4, y);
+      y += 5;
+    });
+    y += 4;
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...BLUE);
+    doc.text(`Total: ${fmt(d.cajaInicial)}`, pw-mg-2, y, { align:'right' }); y += 10;
+  }
+
+  doc.setFillColor(240,253,244); doc.setDrawColor(...GREEN_DARK);
+  doc.roundedRect(mg, y, pw-mg*2, 14, 3, 3, 'FD');
+  doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...GREEN_DARK);
+  doc.text('Caja abierta correctamente', pw/2, y+9, { align:'center' }); y += 22;
+
+  doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...GRAY);
+  doc.text('Che plaS — Control de Caja', pw/2, doc.internal.pageSize.getHeight()-8, { align:'center' });
+
+  const hora = new Date(d.fecha).toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}).replace(':','-');
+  doc.save(`Apertura_${(d.cajaNombre||'Caja').replace(/\s+/g,'_')}_${new Date(d.fecha).toLocaleDateString('es-PE').replace(/\//g,'-')}_${hora}.pdf`);
 }
 
 function pdfSec(doc,title,y,pw,mg,BLUE,LBLUE){
