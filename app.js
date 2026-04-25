@@ -247,7 +247,7 @@ async function _renderCajasLista() {
     const cajas = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       // Ignorar documentos fantasma (sin nombre, sin fecha de apertura, sin monto inicial)
-      .filter(c => c.nombre || c.aperturaFecha || c.cajaInicial > 0 || c.cajaAbierta)
+      .filter(c => !c.eliminada && (c.nombre || c.aperturaFecha || c.cajaInicial > 0 || c.cajaAbierta))
       .sort((a, b) => new Date(b.aperturaFecha || 0) - new Date(a.aperturaFecha || 0));
 
     if (cajas.length === 0) {
@@ -1083,7 +1083,9 @@ async function cerrarCaja() {
   }
 
   // Eliminar la caja de Firestore (el historial ya la tiene)
-  try { await cajaRef().delete(); } catch (e) { console.warn('Error eliminando caja:', e); }
+  try { await cajaRef().delete(); } catch (_) {
+    try { await cajaRef().set({ eliminada: true, cajaAbierta: false, _ts: Date.now() }, { merge: true }); } catch (e2) { console.warn('Error eliminando caja:', e2); }
+  }
 
   await generarPDF(report);
   resetAfterClose();
@@ -1125,8 +1127,22 @@ async function eliminarCajaActual() {
   if (bRef) {
     try { await bRef.delete(); } catch (e) { console.warn('Error eliminando borrador:', e); }
   }
+
   if (currentCajaId) {
-    try { await cajaRef().delete(); } catch (e) { console.warn('Error eliminando caja:', e); }
+    let removed = false;
+    // Intentar borrar; si las reglas de Firestore no permiten delete, hacer soft-delete
+    try { await cajaRef().delete(); removed = true; } catch (_) {}
+    if (!removed) {
+      try {
+        await cajaRef().set({ eliminada: true, cajaAbierta: false, _ts: Date.now() }, { merge: true });
+        removed = true;
+      } catch (e2) {
+        console.error('Error al eliminar caja:', e2);
+        alert('No se pudo eliminar la caja. Verifica tu conexión e intenta de nuevo.');
+        startRealtimeSync();
+        return;
+      }
+    }
   }
 
   resetAfterClose();
