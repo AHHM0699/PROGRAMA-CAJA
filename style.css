@@ -1349,9 +1349,9 @@ kbd {
     box-shadow: none;
   }
 
-  /* Header overflow: hide low-priority buttons, tighten spacing */
-  #btnFlujo, #btnReporte { display: none !important; }
-  .header-right { gap: 4px; }
+  /* Header overflow: compact + wrap so all buttons stay accessible */
+  .header-right { gap: 3px; flex-wrap: wrap; justify-content: flex-end; }
   .caja-nombre-badge { max-width: 80px; font-size: 11px; padding: 3px 7px; }
-  .btn-ghost, .btn-outline-white { padding: 5px 8px; font-size: 12px; }
+  .btn-ghost { padding: 5px 7px; font-size: 11px; }
+  .btn-outline-white { padding: 5px 9px; font-size: 11px; }
 }
