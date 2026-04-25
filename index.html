@@ -19,7 +19,6 @@
     <p class="brand-tagline">Control de Caja</p>
     <p class="login-sub">Ingrese sus credenciales para acceder</p>
     <input type="email" id="emailInput" class="form-control" placeholder="Correo electrónico"
-      style="margin-bottom:10px"
       onkeypress="if(event.key==='Enter') document.getElementById('passInput').focus()">
     <input type="password" id="passInput" class="form-control" placeholder="Contraseña"
       onkeypress="if(event.key==='Enter') login()">
@@ -33,16 +32,15 @@
   <div class="caja-selector-wrap">
     <div class="brand-logo">Che plaS</div>
     <p class="brand-tagline">Control de Caja</p>
-    <p class="login-sub" style="margin-bottom:4px">Selecciona una caja o abre una nueva</p>
+    <p class="login-sub">Selecciona una caja o abre una nueva</p>
 
     <div id="cajasLista" class="cajas-lista"></div>
 
     <button class="btn btn-primary btn-block" id="btnNuevaCaja"
-      onclick="iniciarNuevaCaja()" style="margin-top:16px">
+      onclick="iniciarNuevaCaja()">
       + Abrir nueva caja
     </button>
-    <button class="btn btn-ghost btn-sm" onclick="logout()"
-      style="margin-top:10px;width:100%;color:#6b7280">
+    <button class="btn-logout-selector" onclick="logout()">
       Cerrar sesión
     </button>
   </div>
@@ -82,8 +80,7 @@
         <div class="card-body">
           <div class="input-wrap">
             <input type="text" id="cajaNombreInput" class="form-control"
-              placeholder="Ej: Turno mañana, Caja 1…" maxlength="40"
-              style="padding-left:12px">
+              placeholder="Ej: Turno mañana, Caja 1…" maxlength="40">
           </div>
         </div>
       </div>
@@ -187,11 +184,11 @@
       </div>
 
       <!-- EVENTOS -->
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <span style="font-size:14px;font-weight:600;color:#374151">Eventos de caja</span>
+      <div class="eventos-header">
+        <span class="eventos-header-title">Eventos de caja</span>
         <button class="btn btn-secondary btn-sm" onclick="openEventosModal()">➕ Agregar evento</button>
       </div>
-      <div id="cardEventos" class="card" style="display:none;margin-bottom:18px">
+      <div id="cardEventos" class="card" style="display:none">
         <div class="card-head"><h3>📋 Eventos registrados</h3></div>
         <div class="card-body" id="eventosList"></div>
       </div>
@@ -283,13 +280,13 @@
               <span class="diff-amount" id="diffAmount"></span>
             </div>
           </div>
-          <div id="usdEnCaja" style="display:none;margin-top:10px;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:14px;font-weight:600;color:#1e40af">
+          <div id="usdEnCaja" class="usd-banner" style="display:none">
             💵 USD en caja: <span id="usdEnCajaVal">$0.00</span>
           </div>
         </div>
       </div>
 
-      <div class="form-actions" style="gap:10px;flex-wrap:wrap">
+      <div class="form-actions">
         <button class="btn btn-secondary btn-lg" onclick="generarArqueo()">📊 Arqueo parcial</button>
         <button class="btn btn-success btn-lg" onclick="confirmarCierre()">📄 Cerrar Caja</button>
       </div>
@@ -368,21 +365,17 @@
           <h2>Vista Empleado</h2>
         </div>
 
-        <div class="card" style="margin-bottom:18px">
+        <div class="card">
           <div class="card-head"><h3>🔓 Apertura de gaveta</h3></div>
           <div class="card-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <div class="input-group" style="margin-bottom:6px">
               <input id="posMotivo" type="text" class="form-control" placeholder="Motivo de apertura…"
-                style="flex:1;border-radius:6px"
                 onkeydown="if(event.key==='Enter'){event.preventDefault();abrirCajaPOS()}">
-              <button id="btnAbrirCajaPOS" onclick="abrirCajaPOS()"
-                style="background:#1a6b3c;color:#fff;border:none;border-radius:8px;
-                       padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;
-                       white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.18)">
+              <button id="btnAbrirCajaPOS" class="btn-pos" onclick="abrirCajaPOS()">
                 🔓 Abrir
               </button>
             </div>
-            <span id="posFeedback" style="font-size:12px;color:#6b7280"></span>
+            <span id="posFeedback" class="feedback-text"></span>
             <div id="empAperturasCajaList" style="margin-top:6px"></div>
           </div>
         </div>
@@ -396,15 +389,15 @@
 
         <!-- Yapes — solo ingreso, sin historial -->
         <div id="empYapeCardWrap">
-          <div id="empYapeCard" class="card" style="margin-bottom:18px">
+          <div id="empYapeCard" class="card">
             <div class="card-head">
               <h3>💳 Registrar Yape</h3>
               <button class="btn btn-secondary btn-sm" id="btnPip" onclick="openYapeWidget()">📌 Flotar</button>
             </div>
             <div class="card-body">
               <label class="field-label">Monto recibido por Yape</label>
-              <div style="display:flex;gap:10px">
-                <div class="input-wrap" style="flex:1">
+              <div class="input-group">
+                <div class="input-wrap">
                   <span class="prefix">S/.</span>
                   <input type="number" id="empYapeInput" class="form-control"
                     placeholder="0.00" min="0" step="0.01"
@@ -412,7 +405,7 @@
                 </div>
                 <button class="btn btn-primary" onclick="addEmpYape()">Agregar</button>
               </div>
-              <p id="empYapeFeedback" style="margin-top:8px;font-size:13px;color:#059669;font-weight:600;min-height:18px"></p>
+              <p id="empYapeFeedback" class="feedback-text"></p>
             </div>
           </div>
           <!-- Shown while card is in the floating PiP window -->
@@ -422,18 +415,18 @@
         </div>
 
         <!-- Historial de Yapes — solo lectura -->
-        <div class="card" style="margin-bottom:18px">
+        <div class="card">
           <div class="card-head"><h3>💳 Yapes registrados</h3></div>
           <div class="card-body" id="empYapesListBody">
             <p style="color:#9ca3af;font-size:13px">No hay yapes registrados aún.</p>
           </div>
         </div>
 
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <span style="font-size:14px;font-weight:600;color:#374151">Eventos de caja</span>
+        <div class="eventos-header">
+          <span class="eventos-header-title">Eventos de caja</span>
           <button class="btn btn-secondary btn-sm" onclick="openEventosModal()">➕ Agregar evento</button>
         </div>
-        <div id="cardEventosEmp" class="card" style="display:none;margin-bottom:18px">
+        <div id="cardEventosEmp" class="card" style="display:none">
           <div class="card-head"><h3>📋 Eventos registrados</h3></div>
           <div class="card-body" id="eventosListEmp"></div>
         </div>
@@ -450,11 +443,11 @@
           <h2>📊 Flujo de Caja</h2>
           <p class="section-sub">Dashboard financiero · actualización automática</p>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="mes-nav">
           <button class="btn btn-secondary btn-sm" onclick="cambiarMesFlujo(-1)">‹</button>
-          <span id="flujoMesLabel" style="font-weight:700;font-size:15px;min-width:120px;text-align:center">—</span>
+          <span id="flujoMesLabel" class="mes-nav-label">—</span>
           <button class="btn btn-secondary btn-sm" onclick="cambiarMesFlujo(1)">›</button>
-          <button class="btn btn-secondary btn-sm" onclick="showView('auto')" style="margin-left:8px">← Volver</button>
+          <button class="btn btn-secondary btn-sm" onclick="showView('auto')">← Volver</button>
         </div>
       </div>
 
@@ -519,7 +512,7 @@
       <!-- Line chart -->
       <div class="card">
         <div class="card-head"><h3>Evolución de ventas del mes</h3></div>
-        <div class="card-body" style="padding:14px 16px">
+        <div class="card-body">
           <canvas id="flujoLineChart" style="max-height:200px"></canvas>
         </div>
       </div>
@@ -655,7 +648,7 @@
       <button class="btn-close" onclick="closeEventosModal()">✕</button>
     </div>
     <div class="modal-body">
-      <div class="toggle-group" style="margin-bottom:18px;width:100%">
+      <div class="toggle-group modal-toggle-mb">
         <button class="tgl active" id="tglEvEgreso"  onclick="setEventoTipo('Egreso')">Egreso</button>
         <button class="tgl"        id="tglEvDivisa"  onclick="setEventoTipo('Divisa')">Cambio divisa</button>
         <button class="tgl"        id="tglEvIngreso" onclick="setEventoTipo('Ingreso')">Ingreso</button>
@@ -663,7 +656,7 @@
 
       <!-- Egreso / Ingreso fields -->
       <div id="evFieldsBasic">
-        <div id="evSubtipoWrap" style="display:none;margin-bottom:14px">
+        <div id="evSubtipoWrap" class="modal-field-mb" style="display:none">
           <label class="field-label">Tipo de ingreso</label>
           <div class="toggle-group">
             <button class="tgl active" id="tglSubEfectivo" onclick="setEventoSubtipo('Efectivo')">Efectivo</button>
@@ -671,15 +664,15 @@
           </div>
         </div>
         <label class="field-label">Nota / concepto <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
-        <input type="text" id="evDesc" class="form-control" placeholder="Ej: Pago proveedor Coca-Cola, retiro dueño…" style="margin-bottom:14px">
+        <input type="text" id="evDesc" class="form-control modal-field-mb" placeholder="Ej: Pago proveedor Coca-Cola, retiro dueño…">
         <label class="field-label">Monto (S/.)</label>
         <div class="input-wrap">
           <span class="prefix">S/.</span>
           <input type="number" id="evMonto" class="form-control" placeholder="0.00" min="0" step="0.01">
         </div>
-        <div id="evIncluirFlujoWrap" style="margin-top:14px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;color:#14532d">
-            <input type="checkbox" id="evIncluirFlujo" checked style="width:16px;height:16px;accent-color:#16a34a">
+        <div id="evIncluirFlujoWrap" class="flujo-checkbox-wrap">
+          <label class="flujo-checkbox-label">
+            <input type="checkbox" id="evIncluirFlujo" checked>
             Incluir en flujo de caja mensual
           </label>
         </div>
@@ -688,8 +681,8 @@
       <!-- Divisa fields -->
       <div id="evFieldsDivisa" class="hidden">
         <label class="field-label">Descripción (opcional)</label>
-        <input type="text" id="evDivisaDesc" class="form-control" placeholder="Ej: Cambio cliente" style="margin-bottom:14px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <input type="text" id="evDivisaDesc" class="form-control modal-field-mb" placeholder="Ej: Cambio cliente">
+        <div class="modal-grid-2">
           <div>
             <label class="field-label">Monto USD</label>
             <div class="input-wrap">
@@ -729,7 +722,7 @@
     </div>
     <div class="modal-body">
       <label class="field-label">Categoría</label>
-      <select id="pagoCategoria" class="form-control" style="margin-bottom:14px">
+      <select id="pagoCategoria" class="form-control modal-field-mb">
         <option>Proveedores</option>
         <option>Alquiler</option>
         <option>Servicios</option>
@@ -738,9 +731,9 @@
         <option>Otros</option>
       </select>
       <label class="field-label">Descripción <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
-      <input type="text" id="pagoDesc" class="form-control"
-        placeholder="Ej: Pago Coca-Cola, luz abril…" style="margin-bottom:14px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <input type="text" id="pagoDesc" class="form-control modal-field-mb"
+        placeholder="Ej: Pago Coca-Cola, luz abril…">
+      <div class="modal-grid-2" style="margin-bottom:0">
         <div>
           <label class="field-label">Monto (S/.)</label>
           <div class="input-wrap">
