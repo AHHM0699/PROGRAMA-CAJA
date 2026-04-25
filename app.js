@@ -24,6 +24,14 @@ function cajaRef() { return db.doc(`cajas/${currentCajaId}`); }
 // ============================================================
 //  CONSTANTS
 // ============================================================
+// ── Helpers de fecha/hora siempre en zona horaria de Perú ──────────────────
+const TZ = 'America/Lima';
+function _todayPE() { return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date()); }
+function _mesPE()   { return _todayPE().slice(0, 7); }
+function _fmtDT(d, opts)  { return new Date(d).toLocaleString('es-PE',     { timeZone: TZ, ...(opts||{}) }); }
+function _fmtD(d, opts)   { return new Date(d).toLocaleDateString('es-PE',  { timeZone: TZ, ...(opts||{}) }); }
+function _fmtT(d, opts)   { return new Date(d).toLocaleTimeString('es-PE',  { timeZone: TZ, ...(opts||{}) }); }
+
 const DENOMS = [
   { label: 'S/. 0.10', val: 0.10, tipo: 'Moneda' },
   { label: 'S/. 0.20', val: 0.20, tipo: 'Moneda' },
@@ -96,7 +104,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
   document.getElementById('headerDate').textContent =
-    new Date().toLocaleDateString('es-PE', opts);
+    new Date().toLocaleDateString('es-PE', { ...opts, timeZone: TZ });
 
   auth.onAuthStateChanged(async (user) => {
     if (user) {
@@ -272,7 +280,7 @@ async function _renderCajasLista() {
         <div>
           <div class="caja-item-name">${escHtml(c.nombre || 'Sin nombre')}</div>
           <div class="caja-item-meta">
-            ${c.aperturaFecha ? new Date(c.aperturaFecha).toLocaleString('es-PE') : '—'}
+            ${c.aperturaFecha ? new Date(c.aperturaFecha).toLocaleString('es-PE', { timeZone: TZ }) : '—'}
             &nbsp;·&nbsp; Inicial: ${fmt(c.cajaInicial || 0)}
           </div>
         </div>
@@ -402,7 +410,7 @@ function _showEmployeeView() {
 
   if (open) {
     const fechaStr = state.aperturaFecha
-      ? escHtml(new Date(state.aperturaFecha).toLocaleString('es-PE')) : 'N/A';
+      ? escHtml(new Date(state.aperturaFecha).toLocaleString('es-PE', { timeZone: TZ })) : 'N/A';
     document.getElementById('empResumenGrid').innerHTML = `
       <div class="info-item"><div class="info-label">Caja Inicial</div>
         <div class="info-val">${fmt(state.cajaInicial)}</div></div>
@@ -514,7 +522,7 @@ function _renderAperturasCaja() {
   const lista = state.aperturasCaja || [];
   if (lista.length === 0) { el.innerHTML = ''; return; }
   el.innerHTML = lista.map((a, i) => {
-    const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
     return `<div style="display:flex;justify-content:space-between;align-items:center;
                         padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
       <span style="color:#374151">${i+1}. ${escHtml(a.motivo)}</span>
@@ -892,7 +900,7 @@ function getEsperado() {
 function guardarApertura() {
   const nombreInput = document.getElementById('cajaNombreInput')?.value.trim();
   const nombre = nombreInput ||
-    `Caja ${new Date().toLocaleString('es-PE', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}`;
+    `Caja ${new Date().toLocaleString('es-PE', { timeZone: TZ, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}`;
 
   currentCajaNombre = nombre;
   state.cajaAbierta      = true;
@@ -924,7 +932,7 @@ function guardarApertura() {
 
 function renderResumen() {
   const fechaStr = state.aperturaFecha
-    ? escHtml(new Date(state.aperturaFecha).toLocaleString('es-PE')) : 'N/A';
+    ? escHtml(new Date(state.aperturaFecha).toLocaleString('es-PE', { timeZone: TZ })) : 'N/A';
   document.getElementById('resumenGrid').innerHTML = `
     <div class="info-item"><div class="info-label">Caja Inicial</div>
       <div class="info-val">${fmt(state.cajaInicial)}</div></div>
@@ -1234,7 +1242,7 @@ async function renderReportes() {
   _reportesCache = reports;
 
   tbody.innerHTML = reports.map((r, i) => {
-    const fechaStr = new Date(r.fecha).toLocaleString('es-PE');
+    const fechaStr = new Date(r.fecha).toLocaleString('es-PE', { timeZone: TZ });
     const nombreHtml = r.cajaNombre ? `<br><small style="color:#6b7280">${escHtml(r.cajaNombre)}</small>` : '';
     const pdfBtn = `<button class="btn btn-secondary btn-sm" onclick="descargarReportePDF(${i})">⬇ PDF</button>`;
 
@@ -1308,7 +1316,7 @@ async function exportarExcel() {
   await loadScript(XLSX_URL, XLSX_SRI);
   const data = reports.map(r => ({
     'Caja':                     r.cajaNombre || '',
-    'Fecha Cierre':             new Date(r.fecha).toLocaleString('es-PE'),
+    'Fecha Cierre':             new Date(r.fecha).toLocaleString('es-PE', { timeZone: TZ }),
     'Caja Inicial (S/.)':       r.cajaInicial,
     'Ventas hasta ahora (S/.)': r.ventasHastaAhora,
     'Ventas Final (S/.)':       r.ventasFinal,
@@ -1322,7 +1330,7 @@ async function exportarExcel() {
   ws['!cols'] = [{wch:18},{wch:22},{wch:18},{wch:22},{wch:18},{wch:16},{wch:22},{wch:18},{wch:16},{wch:10}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Reportes de Caja');
-  XLSX.writeFile(wb, `Reportes_Caja_${new Date().toLocaleDateString('es-PE').replace(/\//g,'-')}.xlsx`);
+  XLSX.writeFile(wb, `Reportes_Caja_${new Date().toLocaleDateString('es-PE', { timeZone: TZ }).replace(/\//g,'-')}.xlsx`);
 }
 
 // ============================================================
@@ -1438,7 +1446,7 @@ function _renderEventosInto(cardId, listId) {
     const divisaNote = e.tipo === 'Divisa'
       ? `<span style="font-size:11px;color:#64748b"> ($${(+e.usd).toFixed(2)} × ${e.tc})</span>` : '';
     const horaStr = e.fecha
-      ? new Date(e.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' }) : '';
+      ? new Date(e.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit' }) : '';
     const notaHtml = e.desc
       ? `<div class="evento-nota">${escHtml(e.desc)}${divisaNote}</div>`
       : divisaNote ? `<div class="evento-nota">${divisaNote}</div>` : '';
@@ -1485,12 +1493,12 @@ async function generarPDF(d) {
   doc.text(d.arqueo ? 'ARQUEO PARCIAL DE CAJA' : 'REPORTE DE CIERRE DE CAJA', pw/2, 14, { align:'center' });
   doc.setFont('helvetica','normal'); doc.setFontSize(9);
   const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
-  doc.text(`${new Date(d.fecha).toLocaleDateString('es-PE',opts)}  |  ${new Date(d.fecha).toLocaleTimeString('es-PE')}`, pw/2, 22, { align:'center' });
+  doc.text(`${new Date(d.fecha).toLocaleDateString('es-PE', { ...opts, timeZone: TZ })}  |  ${new Date(d.fecha).toLocaleTimeString('es-PE', { timeZone: TZ })}`, pw/2, 22, { align:'center' });
   if (d.cajaNombre) { doc.setFontSize(8); doc.text(`Caja: ${d.cajaNombre}`, pw/2, 28, { align:'center' }); }
 
   let y = 40;
   y = pdfSec(doc,'DATOS DE APERTURA',y,pw,mg,BLUE,LBLUE);
-  if (d.aperturaFecha) y = pdfRow(doc,'Fecha apertura',new Date(d.aperturaFecha).toLocaleString('es-PE'),y,mg,pw,DARK,BLUE);
+  if (d.aperturaFecha) y = pdfRow(doc,'Fecha apertura',new Date(d.aperturaFecha).toLocaleString('es-PE', { timeZone: TZ }),y,mg,pw,DARK,BLUE);
   y = pdfRow(doc,'Caja Inicial',fmt(d.cajaInicial),y,mg,pw,DARK,BLUE);
   y = pdfRow(doc,'Ventas hasta ahora',fmt(d.ventasHastaAhora),y,mg,pw,DARK,BLUE);
   y = pdfRow(doc,'Último Yape',fmt(d.ultimoYape),y,mg,pw,DARK,BLUE);
@@ -1533,7 +1541,7 @@ async function generarPDF(d) {
     y = newPageIfNeeded(y, d.aperturasCaja.length*7+20);
     y = pdfSec(doc,'APERTURAS DE GAVETA',y,pw,mg,BLUE,LBLUE);
     d.aperturasCaja.forEach((a, i) => {
-      const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit', second:'2-digit' });
       doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
       doc.text(`${i+1}. ${a.motivo}`, mg+2, y);
       doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRAY);
@@ -1546,7 +1554,7 @@ async function generarPDF(d) {
     y = newPageIfNeeded(y, d.rcRegistros.length*7+20);
     y = pdfSec(doc,'CONTROL DE COMPROBANTES SAS',y,pw,mg,BLUE,LBLUE);
     d.rcRegistros.forEach((r, i) => {
-      const hora     = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+      const hora     = new Date(r.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit' });
       const bat      = r.aperturasBat ?? r.aperturas ?? 0;
       const emp      = r.aperturasEmp ?? 0;
       const comp     = r.comprobantes ?? 0;
@@ -1623,11 +1631,11 @@ async function generarPDF(d) {
   doc.setDrawColor(...GRAY); doc.line(mg,ph-14,pw-mg,ph-14);
   doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
   doc.text('Reporte generado por Control de Caja',pw/2,ph-8,{align:'center'});
-  doc.text(new Date(d.fecha).toLocaleString('es-PE'),pw/2,ph-4,{align:'center'});
+  doc.text(new Date(d.fecha).toLocaleString('es-PE', { timeZone: TZ }),pw/2,ph-4,{align:'center'});
 
   const prefix = d.arqueo ? 'Arqueo' : 'Cierre';
-  const hora   = new Date(d.fecha).toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}).replace(':','-');
-  doc.save(`${prefix}_${(d.cajaNombre||'Caja').replace(/\s+/g,'_')}_${new Date(d.fecha).toLocaleDateString('es-PE').replace(/\//g,'-')}_${hora}.pdf`);
+  const hora   = new Date(d.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit',minute:'2-digit'}).replace(':','-');
+  doc.save(`${prefix}_${(d.cajaNombre||'Caja').replace(/\s+/g,'_')}_${new Date(d.fecha).toLocaleDateString('es-PE', { timeZone: TZ }).replace(/\//g,'-')}_${hora}.pdf`);
 }
 
 async function _generarPDFApertura(d) {
@@ -1643,13 +1651,13 @@ async function _generarPDFApertura(d) {
   doc.text('REPORTE DE APERTURA DE CAJA', pw/2, 14, { align:'center' });
   doc.setFont('helvetica','normal'); doc.setFontSize(9);
   const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
-  doc.text(`${new Date(d.fecha).toLocaleDateString('es-PE',opts)}  |  ${new Date(d.fecha).toLocaleTimeString('es-PE')}`, pw/2, 22, { align:'center' });
+  doc.text(`${new Date(d.fecha).toLocaleDateString('es-PE', { ...opts, timeZone: TZ })}  |  ${new Date(d.fecha).toLocaleTimeString('es-PE', { timeZone: TZ })}`, pw/2, 22, { align:'center' });
   if (d.cajaNombre) { doc.setFontSize(8); doc.text(`Caja: ${d.cajaNombre}`, pw/2, 28, { align:'center' }); }
 
   let y = 40;
   y = pdfSec(doc,'DATOS DE APERTURA',y,pw,mg,BLUE,LBLUE);
   y = pdfRow(doc,'Nombre de caja', d.cajaNombre||'—', y,mg,pw,DARK,BLUE);
-  y = pdfRow(doc,'Fecha y hora',   new Date(d.fecha).toLocaleString('es-PE'), y,mg,pw,DARK,BLUE);
+  y = pdfRow(doc,'Fecha y hora',   new Date(d.fecha).toLocaleString('es-PE', { timeZone: TZ }), y,mg,pw,DARK,BLUE);
   y = pdfRow(doc,'Caja Inicial',   fmt(d.cajaInicial), y,mg,pw,DARK,BLUE);
   if (d.ventasHastaAhora) y = pdfRow(doc,'Ventas hasta ahora', fmt(d.ventasHastaAhora), y,mg,pw,DARK,BLUE);
   if (d.ultimoYape)       y = pdfRow(doc,'Último Yape',        fmt(d.ultimoYape),        y,mg,pw,DARK,BLUE);
@@ -1675,8 +1683,8 @@ async function _generarPDFApertura(d) {
   doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...GRAY);
   doc.text('Che plaS — Control de Caja', pw/2, doc.internal.pageSize.getHeight()-8, { align:'center' });
 
-  const hora = new Date(d.fecha).toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}).replace(':','-');
-  doc.save(`Apertura_${(d.cajaNombre||'Caja').replace(/\s+/g,'_')}_${new Date(d.fecha).toLocaleDateString('es-PE').replace(/\//g,'-')}_${hora}.pdf`);
+  const hora = new Date(d.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit',minute:'2-digit'}).replace(':','-');
+  doc.save(`Apertura_${(d.cajaNombre||'Caja').replace(/\s+/g,'_')}_${new Date(d.fecha).toLocaleDateString('es-PE', { timeZone: TZ }).replace(/\//g,'-')}_${hora}.pdf`);
 }
 
 function pdfSec(doc,title,y,pw,mg,BLUE,LBLUE){
@@ -1698,10 +1706,7 @@ function pdfRow(doc,label,value,y,mg,pw,DARK,BLUE){
 //  FLUJO DE CAJA MENSUAL
 // ============================================================
 
-function _flujoMesActual() {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;
-}
+function _flujoMesActual() { return _mesPE(); }
 
 function flujoRef(mes) { return db.doc(`flujo/${mes}`); }
 
@@ -1843,12 +1848,12 @@ function _renderFlujoDashboard() {
   if (document.activeElement !== vIn) {
     vIn.value = lastV ? (vHist[lastV] || '') : '';
     document.getElementById('flujoVentasUlt').textContent =
-      lastV ? new Date(lastV + 'T12:00:00').toLocaleDateString('es-PE') : '—';
+      lastV ? new Date(lastV + 'T12:00:00').toLocaleDateString('es-PE', { timeZone: TZ }) : '—';
   }
   if (document.activeElement !== pIn) {
     pIn.value = lastP ? (pHist[lastP] || '') : '';
     document.getElementById('flujoPlanillaUlt').textContent =
-      lastP ? new Date(lastP + 'T12:00:00').toLocaleDateString('es-PE') : '—';
+      lastP ? new Date(lastP + 'T12:00:00').toLocaleDateString('es-PE', { timeZone: TZ }) : '—';
   }
 
   _renderPagosList();
@@ -1869,7 +1874,7 @@ function _renderPagosList() {
       <div class="flujo-pago-info">
         <span class="flujo-pago-cat">${escHtml(p.categoria)}</span>
         ${p.desc ? `<span class="flujo-pago-desc">${escHtml(p.desc)}</span>` : ''}
-        <span class="flujo-pago-fecha">${p.fecha ? new Date(p.fecha+'T12:00:00').toLocaleDateString('es-PE') : '—'}</span>
+        <span class="flujo-pago-fecha">${p.fecha ? new Date(p.fecha+'T12:00:00').toLocaleDateString('es-PE', { timeZone: TZ }) : '—'}</span>
       </div>
       <div class="flujo-pago-right">
         <span class="flujo-pago-monto">− ${fmt(p.monto)}</span>
@@ -1890,7 +1895,7 @@ function _renderEgresosCajaList() {
       <div class="flujo-pago-info">
         <span class="flujo-pago-cat">${escHtml(e.cajaNombre || 'Caja')}</span>
         ${e.desc ? `<span class="flujo-pago-desc">${escHtml(e.desc)}</span>` : ''}
-        <span class="flujo-pago-fecha">${e.fecha ? new Date(e.fecha).toLocaleDateString('es-PE') : '—'}</span>
+        <span class="flujo-pago-fecha">${e.fecha ? new Date(e.fecha).toLocaleDateString('es-PE', { timeZone: TZ }) : '—'}</span>
       </div>
       <div class="flujo-pago-right">
         <span class="flujo-pago-monto">− ${fmt(e.monto)}</span>
@@ -1900,7 +1905,7 @@ function _renderEgresosCajaList() {
 
 async function saveFlujoField(field, rawValue) {
   const value = parseFloat(rawValue) || 0;
-  const today = new Date().toISOString().split('T')[0];
+  const today = _todayPE();
   const hist  = field === 'ventas' ? 'ventasHistorial' : 'planillaHistorial';
   try {
     await flujoRef(_currentFlujoMes).set(
@@ -1914,7 +1919,7 @@ function openPagoModal() {
   document.getElementById('pagoCategoria').value = 'Proveedores';
   document.getElementById('pagoDesc').value      = '';
   document.getElementById('pagoMonto').value     = '';
-  document.getElementById('pagoFecha').value     = new Date().toISOString().split('T')[0];
+  document.getElementById('pagoFecha').value     = _todayPE();
   document.getElementById('pagoModal').classList.remove('hidden');
 }
 
@@ -1968,7 +1973,7 @@ function _initFlujoCharts() {
     options: {
       responsive: true, maintainAspectRatio: true,
       plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { callback: v => 'S/.' + v.toLocaleString('es-PE') } } }
+      scales: { y: { beginAtZero: true, ticks: { callback: v => 'S/.' + v.toLocaleString('es-PE', { timeZone: TZ }) } } }
     }
   });
 
@@ -1998,7 +2003,7 @@ function _initFlujoCharts() {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { callback: v => 'S/.' + v.toLocaleString('es-PE') } } }
+      scales: { y: { beginAtZero: true, ticks: { callback: v => 'S/.' + v.toLocaleString('es-PE', { timeZone: TZ }) } } }
     }
   });
 }
@@ -2020,7 +2025,7 @@ function _updateFlujoCharts(ventas, planilla, totalPagos, totalEgresosCaja, util
   // Line: evolución de ventas en el mes
   const [y, m] = _currentFlujoMes.split('-').map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
-  const todayStr    = new Date().toISOString().split('T')[0];
+  const todayStr    = _todayPE();
   const labels = [], data = [];
   let lastVal = null;
   for (let d = 1; d <= daysInMonth; d++) {
@@ -2171,7 +2176,7 @@ function _rcRenderRegistros() {
     <div class="card-head"><h3>Registros del día</h3></div>
     <div class="card-body" style="padding:10px 16px">
       ${lista.map((r, i) => {
-        const hora     = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+        const hora     = new Date(r.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit' });
         const bat      = r.aperturasBat ?? r.aperturas ?? 0;
         const emp      = r.aperturasEmp ?? 0;
         const comp     = r.comprobantes ?? 0;
