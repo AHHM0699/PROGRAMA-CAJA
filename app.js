@@ -274,24 +274,11 @@ async function _renderCajasLista() {
             &nbsp;·&nbsp; Inicial: ${fmt(c.cajaInicial || 0)}
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          ${userRole === 'admin' ? `<button onclick="event.stopPropagation();eliminarCaja('${c.id}','${escHtml(c.nombre||'Sin nombre')}')" style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:13px;font-weight:bold" title="Eliminar caja">🗑</button>` : ''}
-          <div class="caja-item-arrow">›</div>
-        </div>
+        <div class="caja-item-arrow">›</div>
       </div>`).join('');
   } catch (e) {
     lista.innerHTML = '<p style="color:#dc2626;text-align:center">Error cargando cajas</p>';
     console.error(e);
-  }
-}
-
-async function eliminarCaja(cajaId, nombre) {
-  if (!confirm(`¿Eliminar la caja "${nombre}"?\n\nEsta acción no se puede deshacer.`)) return;
-  try {
-    await db.doc(`cajas/${cajaId}`).delete();
-    await _renderCajasLista();
-  } catch (e) {
-    alert('Error al eliminar: ' + e.message);
   }
 }
 
