@@ -1546,18 +1546,22 @@ async function generarPDF(d) {
     y = newPageIfNeeded(y, d.rcRegistros.length*7+20);
     y = pdfSec(doc,'CONTROL DE COMPROBANTES SAS',y,pw,mg,BLUE,LBLUE);
     d.rcRegistros.forEach((r, i) => {
-      const hora = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+      const hora  = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
       const diff  = r.aperturas - r.comprobantes;
       const color = diff === 0 ? GREEN : diff > 0 ? RED : [29,78,216];
       const label = diff === 0 ? '✔ OK' : diff > 0 ? `⚠ ${diff} sin comp.` : `ℹ +${Math.abs(diff)} docs`;
-      y = newPageIfNeeded(y, 8);
+      y = newPageIfNeeded(y, 12);
       doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
-      doc.text(`${i+1}. Aperturas: ${r.aperturas}  /  Comprobantes: ${r.comprobantes}`, mg+2, y);
+      const linea1Parts = [];
+      if (r.aperturasBat > 0) linea1Parts.push(`Bat: ${r.aperturasBat}`);
+      if (r.aperturasEmp != null) linea1Parts.push(`Empleado: ${r.aperturasEmp}`);
+      const detalleAp = linea1Parts.length ? ` (${linea1Parts.join(' / ')})` : '';
+      doc.text(`${i+1}. Aperturas: ${r.aperturas}${detalleAp}  /  Comprobantes: ${r.comprobantes}`, mg+2, y);
       doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...color);
       doc.text(label, pw-mg-2, y, { align:'right' });
       doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
       doc.text(hora, pw-mg-2, y+4, { align:'right' });
-      doc.setDrawColor(235,235,235); doc.line(mg, y+6, pw-mg, y+6); y+=9;
+      doc.setDrawColor(235,235,235); doc.line(mg, y+7, pw-mg, y+7); y+=10;
     }); y+=2;
   }
 
@@ -2076,17 +2080,12 @@ function _rcSetMsg(html, spinner) {
 async function iniciarReporteCaja() {
   const btn = document.getElementById('btnIniciarReporte');
   btn.disabled = true;
-  document.getElementById('rcFormComprobantes').style.display = 'none';
   _rcSetMsg('Leyendo portapapeles…', true);
 
   let txt = '';
   try {
     txt = await navigator.clipboard.readText();
-  } catch(e) {
-    _rcSetMsg('Sin permiso para leer el portapapeles. Haz clic en la página e intenta de nuevo.', false);
-    btn.disabled = false;
-    return;
-  }
+  } catch(e) { txt = ''; }
 
   let parsed = null;
   try { parsed = JSON.parse(txt); } catch(e) {}
@@ -2099,21 +2098,30 @@ async function iniciarReporteCaja() {
     cajaTimes = parsed.cajaTimes;
   }
 
-  if (!cajaTimes) {
-    _rcSetMsg('El portapapeles no contiene datos válidos.<br>Ejecuta primero <b>REPORTE CAJA.bat</b> en el escritorio.', false);
-    btn.disabled = false;
-    return;
-  }
+  _rcCajaTimes = cajaTimes || [];
 
-  _rcCajaTimes = cajaTimes;
+  const aperturasEmp = (state.aperturasCaja || []).length;
+  const aperturasBat = _rcCajaTimes.length;
 
   // Abrir SAS para que el usuario genere el reporte manualmente
   const win = window.open(SAS_REPORTE_URL, '_blank');
   if (win) win.focus();
 
-  _rcSetMsg(`✔ ${cajaTimes.length} apertura(s) encontradas. El SAS se abrió — genera el reporte allí e ingresa los comprobantes abajo.`, false);
+  let msg = '';
+  if (aperturasBat > 0) {
+    msg = `✔ Datos del .bat: <b>${aperturasBat}</b> apertura(s). El SAS se abrió — ingresa los comprobantes abajo.`;
+  } else {
+    msg = `El SAS se abrió. No se encontraron datos del .bat — se usarán las aperturas del empleado. Ingresa los comprobantes abajo.`;
+  }
+  _rcSetMsg(msg, false);
 
-  document.getElementById('rcAperturasInfo').textContent = `Aperturas de gaveta registradas: ${cajaTimes.length}`;
+  const info = document.getElementById('rcAperturasInfo');
+  if (info) {
+    const partes = [];
+    if (aperturasBat > 0) partes.push(`Bat: ${aperturasBat}`);
+    partes.push(`Empleado: ${aperturasEmp}`);
+    info.textContent = `Aperturas registradas — ${partes.join('  |  ')}`;
+  }
   document.getElementById('rcFormComprobantes').style.display = '';
   const input = document.getElementById('rcInputComprobantes');
   if (input) { input.value = ''; input.focus(); }
@@ -2126,9 +2134,13 @@ function rcRegistrarComprobantes() {
   const comprobantes = parseInt(input?.value, 10);
   if (isNaN(comprobantes) || comprobantes < 0) { if (input) input.focus(); return; }
 
-  const aperturas = (_rcCajaTimes || []).length;
+  const aperturasBat = (_rcCajaTimes || []).length;
+  const aperturasEmp = (state.aperturasCaja || []).length;
+  // Usar bat si disponible, si no el del empleado
+  const aperturas = aperturasBat > 0 ? aperturasBat : aperturasEmp;
+
   if (!Array.isArray(state.rcRegistros)) state.rcRegistros = [];
-  state.rcRegistros.push({ aperturas, comprobantes, fecha: new Date().toISOString() });
+  state.rcRegistros.push({ aperturas, aperturasBat, aperturasEmp, comprobantes, fecha: new Date().toISOString() });
   saveState();
   _rcRenderRegistros();
   if (input) input.value = '';
@@ -2159,22 +2171,27 @@ function _rcRenderRegistros() {
     <div class="card-head"><h3>Registros del día</h3></div>
     <div class="card-body" style="padding:10px 16px">
       ${lista.map((r, i) => {
-        const hora = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
-        const diff = r.aperturas - r.comprobantes;
+        const hora  = new Date(r.fecha).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit' });
+        const diff  = r.aperturas - r.comprobantes;
         const color = diff === 0 ? '#15803d' : diff > 0 ? '#c2410c' : '#1d4ed8';
         const icon  = diff === 0 ? '✔' : diff > 0 ? '⚠' : 'ℹ';
+        // Detalle de aperturas: bat y/o empleado
+        const detalle = [];
+        if (r.aperturasBat != null && r.aperturasBat > 0) detalle.push(`bat: ${r.aperturasBat}`);
+        if (r.aperturasEmp != null) detalle.push(`empleado: ${r.aperturasEmp}`);
+        const detalleStr = detalle.length ? ` <span style="color:#9ca3af;font-size:11px">(${detalle.join(' / ')})</span>` : '';
         return `<div style="display:flex;justify-content:space-between;align-items:center;
                             padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
-          <div>
+          <div style="flex:1;min-width:0">
             <span style="color:${color};font-weight:700">${icon}</span>
             <span style="margin-left:6px;color:#374151">
-              <b>${r.aperturas}</b> aperturas / <b>${r.comprobantes}</b> comprobantes
+              <b>${r.aperturas}</b> aperturas${detalleStr} / <b>${r.comprobantes}</b> comprobantes
             </span>
             <span style="color:#9ca3af;font-size:11px;margin-left:8px">${hora}</span>
           </div>
           <button onclick="rcDeleteRegistro(${i})"
             style="background:none;border:none;color:#dc2626;cursor:pointer;
-                   font-size:15px;padding:0 4px;line-height:1" title="Eliminar">✕</button>
+                   font-size:15px;padding:0 4px;line-height:1;flex-shrink:0" title="Eliminar">✕</button>
         </div>`;
       }).join('')}
     </div>
