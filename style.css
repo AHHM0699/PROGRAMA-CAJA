@@ -621,6 +621,9 @@ textarea.form-control { resize: vertical; }
 .btn-excel { background: var(--green-600); color: #fff; }
 .btn-excel:hover { background: var(--green-700); }
 
+.btn-danger { background: var(--red-50); color: var(--red-700); border: 1px solid var(--red-200); }
+.btn-danger:hover { background: var(--red-100); color: var(--red-800); border-color: var(--red-300); }
+
 .btn-ghost {
   background: rgba(255,255,255,.14);
   color: #fff;

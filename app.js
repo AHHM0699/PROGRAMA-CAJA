@@ -41,7 +41,7 @@ const DENOMS = [
 const STATE_FIELDS = [
   'cajaAbierta', 'nombre', 'cajaInicial', 'ventasHastaAhora', 'ultimoYape',
   'aperturaFecha', 'inicialMode', 'inicialBreakdown',
-  'eventos', 'yapesRaw', 'aperturasCaja', '_ts',
+  'eventos', 'yapesRaw', 'aperturasCaja', '_ts', 'historialBorradorId',
 ];
 
 // ============================================================
@@ -53,6 +53,7 @@ function _defaultState() {
     ventasHastaAhora: 0, ultimoYape: 0, aperturaFecha: null,
     inicialMode: 'monto', inicialBreakdown: null,
     eventos: [], yapesRaw: '', aperturasCaja: [], _ts: 0,
+    historialBorradorId: null,
   };
 }
 
@@ -648,11 +649,50 @@ function _stateToDoc() {
   return doc;
 }
 
+// ---- Borrador helpers (historial en tiempo real) ----
+function _calcTotalYapesFromRaw(raw) {
+  return round2((raw || '').split('\n').reduce((sum, s) => {
+    const v = parseFloat(s.trim());
+    return sum + (isNaN(v) || v < 0 ? 0 : v);
+  }, 0));
+}
+
+function _borradorRef() {
+  return state.historialBorradorId ? historialCol.doc(state.historialBorradorId) : null;
+}
+
+function _buildBorradorDoc() {
+  return {
+    estado:          'borrador',
+    fecha:           state.aperturaFecha || new Date().toISOString(),
+    aperturaFecha:   state.aperturaFecha,
+    cajaId:          currentCajaId,
+    cajaNombre:      currentCajaNombre || state.nombre || '',
+    cajaInicial:     state.cajaInicial     || 0,
+    ventasHastaAhora: state.ventasHastaAhora || 0,
+    ultimoYape:      state.ultimoYape      || 0,
+    inicialMode:     state.inicialMode     || 'monto',
+    inicialBreakdown: state.inicialBreakdown || null,
+    yapesRaw:        state.yapesRaw        || '',
+    totalYapes:      _calcTotalYapesFromRaw(state.yapesRaw),
+    eventos:         state.eventos         || [],
+    aperturasCaja:   state.aperturasCaja   || [],
+  };
+}
+
+function _syncBorrador() {
+  const ref = _borradorRef();
+  if (!ref) return;
+  ref.set(_buildBorradorDoc()).catch(e => console.warn('Error sincronizando borrador:', e));
+}
+// ---- fin borrador helpers ----
+
 function saveStateNow() {
   if (!currentCajaId) return;
   clearTimeout(_estadoPushTimer);
   state._ts = Date.now();
   cajaRef().set(_stateToDoc()).catch(e => console.warn('saveStateNow error:', e));
+  _syncBorrador();
 }
 
 function saveState() {
@@ -661,6 +701,7 @@ function saveState() {
   clearTimeout(_estadoPushTimer);
   _estadoPushTimer = setTimeout(() => {
     cajaRef().set(_stateToDoc()).catch(e => console.warn('saveState error:', e));
+    _syncBorrador();
   }, 1200);
 }
 
@@ -828,20 +869,13 @@ function guardarApertura() {
   // Crear nuevo documento en la colección cajas
   const newRef  = db.collection('cajas').doc();
   currentCajaId = newRef.id;
-  newRef.set(_stateToDoc()).catch(e => console.error('Error creando caja:', e));
 
-  // Guardar apertura en historial
-  historialCol.add({
-    tipo:            'apertura',
-    fecha:           state.aperturaFecha,
-    cajaId:          newRef.id,
-    cajaNombre:      nombre,
-    cajaInicial:     state.cajaInicial,
-    inicialMode:     state.inicialMode,
-    inicialBreakdown: state.inicialBreakdown || null,
-    ventasHastaAhora: state.ventasHastaAhora,
-    ultimoYape:      state.ultimoYape,
-  }).catch(e => console.warn('Error guardando apertura en historial:', e));
+  // Crear borrador en historial (se actualiza en tiempo real; se convierte en cierre al cerrar)
+  const borradorRef = historialCol.doc();
+  state.historialBorradorId = borradorRef.id;
+
+  newRef.set(_stateToDoc()).catch(e => console.error('Error creando caja:', e));
+  borradorRef.set(_buildBorradorDoc()).catch(e => console.warn('Error creando borrador:', e));
 
   startRealtimeSync();
   _updateCajaHeader();
@@ -1040,7 +1074,14 @@ async function cerrarCaja() {
     configRef.set({ lastDenomQtys }, { merge: true }).catch(() => {});
   }
 
-  await saveReport(report);
+  // Actualizar el borrador con datos finales (o crear nuevo si no existe)
+  const bRef = _borradorRef();
+  if (bRef) {
+    try { await bRef.set({ ...report, estado: 'cerrado' }); }
+    catch (e) { console.error('Error actualizando borrador al cierre:', e); await saveReport(report); }
+  } else {
+    await saveReport(report);
+  }
 
   // Eliminar la caja de Firestore (el historial ya la tiene)
   try { await cajaRef().delete(); } catch (e) { console.warn('Error eliminando caja:', e); }
@@ -1074,6 +1115,22 @@ function resetAfterClose() {
   if (badge) badge.classList.add('hidden');
 
   showCajaSelector();
+}
+
+async function eliminarCajaActual() {
+  if (!confirm('¿Eliminar esta caja?\n\nSe borrarán todos los datos de la sesión actual (yapes, eventos, etc.). Esta acción no se puede deshacer.')) return;
+
+  stopRealtimeSync();
+
+  const bRef = _borradorRef();
+  if (bRef) {
+    try { await bRef.delete(); } catch (e) { console.warn('Error eliminando borrador:', e); }
+  }
+  if (currentCajaId) {
+    try { await cajaRef().delete(); } catch (e) { console.warn('Error eliminando caja:', e); }
+  }
+
+  resetAfterClose();
 }
 
 // ============================================================
@@ -1125,6 +1182,22 @@ async function renderReportes() {
     const nombreHtml = r.cajaNombre ? `<br><small style="color:#6b7280">${escHtml(r.cajaNombre)}</small>` : '';
     const pdfBtn = `<button class="btn btn-secondary btn-sm" onclick="descargarReportePDF(${i})">⬇ PDF</button>`;
 
+    if (r.estado === 'borrador') {
+      const evCnt  = (r.eventos || []).length;
+      const evNote = evCnt ? ` · ${evCnt} evento${evCnt > 1 ? 's' : ''}` : '';
+      return `<tr style="background:#fffbeb">
+        <td>${fechaStr}${nombreHtml}<br><span style="font-size:11px;font-weight:700;color:#d97706;background:#fef3c7;padding:1px 6px;border-radius:4px">ACTIVA${evNote}</span></td>
+        <td>${fmt(r.cajaInicial)}</td>
+        <td>${fmt(r.ventasHastaAhora)}</td>
+        <td style="color:#9ca3af;font-size:12px">—</td>
+        <td>${r.totalYapes != null ? fmt(r.totalYapes) : '—'}</td>
+        <td style="color:#9ca3af;font-size:12px">—</td>
+        <td style="color:#9ca3af;font-size:12px">—</td>
+        <td style="color:#9ca3af;font-size:12px">En curso</td>
+        <td></td>
+      </tr>`;
+    }
+
     if (r.tipo === 'apertura') {
       return `<tr style="background:#f0fdf4">
         <td>${fechaStr}${nombreHtml}<br><span style="font-size:11px;font-weight:700;color:#16a34a;background:#dcfce7;padding:1px 6px;border-radius:4px">APERTURA</span></td>
@@ -1171,6 +1244,7 @@ async function exportarExcel() {
   const desde = document.getElementById('filtroDesde')?.value;
   const hasta  = document.getElementById('filtroHasta')?.value;
   let reports  = allReports;
+  reports = reports.filter(r => r.estado !== 'borrador' && r.tipo !== 'apertura');
   if (desde) reports = reports.filter(r => new Date(r.fecha) >= new Date(desde));
   if (hasta) { const h = new Date(hasta); h.setHours(23,59,59); reports = reports.filter(r => new Date(r.fecha) <= h); }
   if (reports.length === 0) { alert('No hay reportes para exportar.'); return; }
