@@ -59,7 +59,6 @@
       <button id="btnFlujo" class="btn btn-ghost hidden" onclick="showFlujoView()">📊 Flujo</button>
       <button id="btnHistorial" class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
       <button id="btnReporte" class="btn btn-ghost hidden" onclick="openReporteCaja()">📊 Reporte</button>
-      <button id="btnYapes" class="btn btn-ghost hidden" onclick="openYapesWidget()">💚 Yapes</button>
       <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
     </div>
   </header>
@@ -169,7 +168,7 @@
       <div class="card">
         <div class="card-head">
           <h3><span class="step-num">2</span> Yapes Recibidos</h3>
-          <button class="btn btn-secondary btn-sm" onclick="openYapeWidget()">📌 Flotar</button>
+          <button class="btn btn-secondary btn-sm" onclick="openYapesWidget()">💚 Yapes</button>
         </div>
         <div class="card-body">
           <label class="field-label">Un monto por línea — presiona Enter para agregar otro</label>
@@ -390,12 +389,21 @@
           </div>
         </div>
 
+        <div class="eventos-header">
+          <span class="eventos-header-title">Eventos de caja</span>
+          <button class="btn btn-secondary btn-sm" onclick="openEventosModal()">➕ Agregar evento</button>
+        </div>
+        <div id="cardEventosEmp" class="card" style="display:none">
+          <div class="card-head"><h3>📋 Eventos registrados</h3></div>
+          <div class="card-body" id="eventosListEmp"></div>
+        </div>
+
         <!-- Yapes — solo ingreso, sin historial -->
         <div id="empYapeCardWrap">
           <div id="empYapeCard" class="card">
             <div class="card-head">
               <h3>💳 Registrar Yape</h3>
-              <button class="btn btn-secondary btn-sm" id="btnPip" onclick="openYapeWidget()">📌 Flotar</button>
+              <button class="btn btn-secondary btn-sm" onclick="openYapesWidget()">💚 Yapes</button>
             </div>
             <div class="card-body">
               <label class="field-label">Monto recibido por Yape</label>
@@ -411,7 +419,6 @@
               <p id="empYapeFeedback" class="feedback-text"></p>
             </div>
           </div>
-          <!-- Shown while card is in the floating PiP window -->
           <div id="empYapePipPlaceholder" class="pip-placeholder hidden">
             📌 Widget activo en ventana flotante
           </div>
@@ -423,15 +430,6 @@
           <div class="card-body" id="empYapesListBody">
             <p style="color:#9ca3af;font-size:13px">No hay yapes registrados aún.</p>
           </div>
-        </div>
-
-        <div class="eventos-header">
-          <span class="eventos-header-title">Eventos de caja</span>
-          <button class="btn btn-secondary btn-sm" onclick="openEventosModal()">➕ Agregar evento</button>
-        </div>
-        <div id="cardEventosEmp" class="card" style="display:none">
-          <div class="card-head"><h3>📋 Eventos registrados</h3></div>
-          <div class="card-body" id="eventosListEmp"></div>
         </div>
       </div>
 

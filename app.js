@@ -292,7 +292,6 @@ async function selectCaja(cajaId) {
   startRealtimeSync();
 
   document.getElementById('cajaSelectorScreen').style.display = 'none';
-  document.getElementById('btnYapes').classList.remove('hidden');
   _updateCajaHeader();
   showView('auto');
 }
