@@ -940,8 +940,33 @@ function renderResumen() {
       <div class="info-val">${fmt(state.ultimoYape)}</div></div>`;
 }
 
-function prefillInicialDenoms() {
-  const saved = globalConfig.lastDenomQtys;
+async function _getLastCierreDenomQtys() {
+  const cfg = globalConfig.lastDenomQtys;
+  if (Array.isArray(cfg) && cfg.some(q => +q > 0)) return cfg.map(q => +q || 0);
+
+  try {
+    const snap = await historialCol.orderBy('fecha', 'desc').limit(20).get();
+    for (const doc of snap.docs) {
+      const d = doc.data();
+      if (d.estado === 'borrador') continue;
+      if (d.cierreMode === 'denom' && Array.isArray(d.cierreBreakdown) && d.cierreBreakdown.length) {
+        const qtys = DENOMS.map(denom => {
+          const item = d.cierreBreakdown.find(b => b.label === denom.label);
+          return item ? (+item.qty || 0) : 0;
+        });
+        if (qtys.some(q => q > 0)) {
+          globalConfig.lastDenomQtys = qtys;
+          configRef.set({ lastDenomQtys: qtys }, { merge: true }).catch(() => {});
+          return qtys;
+        }
+      }
+    }
+  } catch (e) { console.warn('No se pudo leer cierre anterior del historial:', e); }
+  return null;
+}
+
+async function prefillInicialDenoms() {
+  const saved = await _getLastCierreDenomQtys();
   if (!Array.isArray(saved)) return;
   saved.forEach((qty, i) => {
     if (!qty) return;
@@ -2049,7 +2074,9 @@ function resetInactivityTimer()  { /* desactivado */ }
 //  UTILS
 // ============================================================
 function round2(n) { return Math.round(n * 100) / 100; }
-function fmt(n)    { return `S/. ${(+n).toFixed(2)}`; }
+function fmt(n)    {
+  return `S/. ${(+n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 function escHtml(str) {
   return String(str)
