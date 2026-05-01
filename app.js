@@ -477,23 +477,35 @@ function _el(id) {
 }
 
 // ── Apertura de gaveta POS-D via protocolo cajaabierta:// ────
-async function abrirCajaPOS() {
-  const btn    = document.getElementById('btnAbrirCajaPOS');
-  const fb     = document.getElementById('posFeedback');
-  const motInp = document.getElementById('posMotivo');
-  const motivo = (motInp?.value || '').trim();
+function _registrarAperturaCaja({ motivo, tipo }) {
+  if (!Array.isArray(state.aperturasCaja)) state.aperturasCaja = [];
+  state.aperturasCaja.push({ motivo, tipo, fecha: new Date().toISOString() });
+  saveState();
+  _renderAperturasCaja();
+}
 
+function _validarMotivoApertura() {
+  const motInp = document.getElementById('posMotivo');
+  const fb     = document.getElementById('posFeedback');
+  const motivo = (motInp?.value || '').trim();
   if (!motivo) {
     if (motInp) { motInp.focus(); motInp.style.borderColor = '#dc2626'; }
-    if (fb) fb.textContent = 'Escribe el motivo antes de abrir.';
-    return;
+    if (fb) fb.textContent = 'Escribe el motivo antes de continuar.';
+    return null;
   }
   if (motInp) motInp.style.borderColor = '';
+  if (fb)     fb.textContent = '';
+  return { motivo, motInp, fb };
+}
+
+async function abrirCajaPOS() {
+  const v = _validarMotivoApertura();
+  if (!v) return;
+  const { motivo, motInp, fb } = v;
+  const btn = document.getElementById('btnAbrirCajaPOS');
   if (btn) btn.disabled = true;
-  if (fb)  fb.textContent = '';
 
   try {
-    // Disparar protocolo cajaabierta:// → powershell abrir_gaveta.ps1
     const a = document.createElement('a');
     a.href = 'cajaabierta://abrir';
     a.style.display = 'none';
@@ -501,14 +513,28 @@ async function abrirCajaPOS() {
     a.click();
     document.body.removeChild(a);
 
-    // Registrar apertura en el state
-    if (!Array.isArray(state.aperturasCaja)) state.aperturasCaja = [];
-    state.aperturasCaja.push({ motivo, fecha: new Date().toISOString() });
-    saveState();
-    _renderAperturasCaja();
+    _registrarAperturaCaja({ motivo, tipo: 'fisica' });
 
     if (motInp) motInp.value = '';
     if (fb) { fb.textContent = '✔ Gaveta abierta'; setTimeout(() => { if (fb) fb.textContent = ''; }, 2500); }
+  } catch (e) {
+    if (fb) fb.textContent = 'Error: ' + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function registrarAperturaSinAbrir() {
+  const v = _validarMotivoApertura();
+  if (!v) return;
+  const { motivo, motInp, fb } = v;
+  const btn = document.getElementById('btnRegistrarApertura');
+  if (btn) btn.disabled = true;
+
+  try {
+    _registrarAperturaCaja({ motivo, tipo: 'registro' });
+    if (motInp) motInp.value = '';
+    if (fb) { fb.textContent = '✔ Evento registrado (sin abrir gaveta)'; setTimeout(() => { if (fb) fb.textContent = ''; }, 2500); }
   } catch (e) {
     if (fb) fb.textContent = 'Error: ' + e.message;
   } finally {
@@ -522,11 +548,19 @@ function _renderAperturasCaja() {
   const lista = state.aperturasCaja || [];
   if (lista.length === 0) { el.innerHTML = ''; return; }
   el.innerHTML = lista.map((a, i) => {
-    const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+    const d        = new Date(a.fecha);
+    const fecha    = d.toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit' });
+    const hora     = d.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+    const esRegistro = a.tipo === 'registro';
+    const badge    = esRegistro
+      ? '<span style="background:#e5e7eb;color:#374151;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">📝 Registro</span>'
+      : '<span style="background:#dcfce7;color:#166534;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔓 Gaveta</span>';
     return `<div style="display:flex;justify-content:space-between;align-items:center;
                         padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
-      <span style="color:#374151">${i+1}. ${escHtml(a.motivo)}</span>
-      <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
+      <span style="color:#374151;min-width:0;overflow:hidden;text-overflow:ellipsis">
+        ${i+1}. ${badge}${escHtml(a.motivo)}
+      </span>
+      <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${fecha} ${hora}</span>
     </div>`;
   }).join('');
 }
@@ -1562,11 +1596,14 @@ async function generarPDF(d) {
     y = newPageIfNeeded(y, d.aperturasCaja.length*7+20);
     y = pdfSec(doc,'APERTURAS DE GAVETA',y,pw,mg,BLUE,LBLUE);
     d.aperturasCaja.forEach((a, i) => {
-      const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      const dt    = new Date(a.fecha);
+      const fecha = dt.toLocaleDateString('es-PE', { timeZone: TZ, day:'2-digit', month:'2-digit', year:'numeric' });
+      const hora  = dt.toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      const tag   = a.tipo === 'registro' ? '[Solo registro]' : '[Gaveta]';
       doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
-      doc.text(`${i+1}. ${a.motivo}`, mg+2, y);
+      doc.text(`${i+1}. ${tag} ${a.motivo}`, mg+2, y);
       doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRAY);
-      doc.text(hora, pw-mg-2, y, { align:'right' });
+      doc.text(`${fecha} ${hora}`, pw-mg-2, y, { align:'right' });
       doc.setDrawColor(235,235,235); doc.line(mg, y+2.5, pw-mg, y+2.5); y+=7;
     }); y+=2;
   }
@@ -2130,7 +2167,8 @@ async function iniciarReporteCaja() {
   _rcCajaTimes = cajaTimes || [];
 
   const aperturasBat = _rcCajaTimes.length;
-  const aperturasEmp = (state.aperturasCaja || []).length;
+  const aperturasEmp = (state.aperturasCaja || [])
+    .filter(a => a.tipo !== 'registro').length;
 
   // Abrir SAS para que el usuario genere el reporte manualmente
   const win = window.open(SAS_REPORTE_URL, '_blank');
@@ -2164,7 +2202,8 @@ function rcRegistrarComprobantes() {
   if (isNaN(comprobantes) || comprobantes < 0) { if (input) input.focus(); return; }
 
   const aperturasBat = (_rcCajaTimes || []).length;
-  const aperturasEmp = (state.aperturasCaja || []).length;
+  const aperturasEmp = (state.aperturasCaja || [])
+    .filter(a => a.tipo !== 'registro').length;
   const esperado     = comprobantes + aperturasEmp;
   const diff         = aperturasBat - esperado;   // 0 = cuadra
 
