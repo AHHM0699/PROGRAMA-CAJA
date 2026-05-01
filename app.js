@@ -1773,6 +1773,8 @@ async function getEgresosCajaDelMes(mes) {
       .get();
     snap.forEach(doc => {
       const d = doc.data();
+      // Ignorar borradores: las cajas abiertas se leen por separado desde 'cajas'
+      if (d.estado === 'borrador') return;
       (d.eventos || []).forEach(ev => {
         if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
             (ev.fecha || '').startsWith(mes))
@@ -1782,7 +1784,7 @@ async function getEgresosCajaDelMes(mes) {
   } catch(e) { console.warn('getEgresosCaja historial:', e); }
 
   try {
-    // Solo cajas AÚN ABIERTAS — las cerradas ya están en historialCol
+    // Solo cajas AÚN ABIERTAS — las cerradas ya están en historialCol como 'cerrado'
     const snap = await db.collection('cajas').where('cajaAbierta', '==', true).get();
     snap.forEach(doc => {
       const d = doc.data();
