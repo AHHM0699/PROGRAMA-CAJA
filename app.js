@@ -759,6 +759,7 @@ function _buildBorradorDoc() {
     totalYapes:      _calcTotalYapesFromRaw(state.yapesRaw),
     eventos:         state.eventos         || [],
     aperturasCaja:   state.aperturasCaja   || [],
+    rcRegistros:     state.rcRegistros     || [],
   };
 }
 
@@ -1129,6 +1130,8 @@ async function generarArqueo() {
 
 async function cerrarCaja() {
   closeCierreConfirm();
+  // Evita que un _syncBorrador tardío sobrescriba el doc 'cerrado'.
+  clearTimeout(_estadoPushTimer);
   const ventasFinal      = parseFloat(document.getElementById('ventasFinal').value) || 0;
   const totalYapes       = getTotalYapes();
   const yapesList        = getYapesList();
@@ -1594,11 +1597,13 @@ async function generarPDF(d) {
       const hora     = new Date(r.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit' });
       const bat      = r.aperturasBat ?? r.aperturas ?? 0;
       const emp      = r.aperturasEmp ?? 0;
+      const empReg   = r.aperturasEmpRegistro ?? 0;
       const comp     = r.comprobantes ?? 0;
       const esperado = comp + emp;
       const diff     = bat - esperado;
       const color    = diff === 0 ? GREEN : RED;
       const label    = diff === 0 ? '✔ Cuadra' : diff > 0 ? `⚠ Faltan ${diff}` : `⚠ Sobran ${Math.abs(diff)}`;
+      const regNote  = empReg > 0 ? `  (+ ${empReg} solo registro)` : '';
       y = newPageIfNeeded(y, 14);
       doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...color);
       doc.text(`${i+1}. ${label}`, mg+2, y);
@@ -1606,7 +1611,7 @@ async function generarPDF(d) {
       doc.text(hora, pw-mg-2, y, { align:'right' });
       y += 5;
       doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...DARK);
-      doc.text(`Bat: ${bat}  =  Comprobantes: ${comp}  +  Empleado: ${emp}${diff !== 0 ? `  (suma: ${esperado})` : ''}`, mg+4, y);
+      doc.text(`Bat: ${bat}  =  Comprobantes: ${comp}  +  Empleado: ${emp}${regNote}${diff !== 0 ? `  (suma: ${esperado})` : ''}`, mg+4, y);
       doc.setDrawColor(235,235,235); doc.line(mg, y+3, pw-mg, y+3); y+=7;
     }); y+=2;
   }
@@ -2146,9 +2151,11 @@ async function iniciarReporteCaja() {
 
   _rcCajaTimes = cajaTimes || [];
 
-  const aperturasBat = _rcCajaTimes.length;
-  const aperturasEmp = (state.aperturasCaja || [])
+  const aperturasBat        = _rcCajaTimes.length;
+  const aperturasEmpFisica  = (state.aperturasCaja || [])
     .filter(a => a.tipo !== 'registro').length;
+  const aperturasEmpRegistro = (state.aperturasCaja || [])
+    .filter(a => a.tipo === 'registro').length;
 
   // Abrir SAS para que el usuario genere el reporte manualmente
   const win = window.open(SAS_REPORTE_URL, '_blank');
@@ -2165,9 +2172,12 @@ async function iniciarReporteCaja() {
 
   const info = document.getElementById('rcAperturasInfo');
   if (info) {
+    const regNote = aperturasEmpRegistro > 0
+      ? ` &nbsp;<span style="color:#6b7280;font-weight:500">(+ ${aperturasEmpRegistro} solo registro)</span>`
+      : '';
     info.innerHTML =
       `Total aperturas (.bat): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
-      `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
+      `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmpFisica}</b>${regNote}`;
   }
   document.getElementById('rcFormComprobantes').style.display = '';
   const input = document.getElementById('rcInputComprobantes');
@@ -2181,24 +2191,30 @@ function rcRegistrarComprobantes() {
   const comprobantes = parseInt(input?.value, 10);
   if (isNaN(comprobantes) || comprobantes < 0) { if (input) input.focus(); return; }
 
-  const aperturasBat = (_rcCajaTimes || []).length;
-  const aperturasEmp = (state.aperturasCaja || [])
+  const aperturasBat         = (_rcCajaTimes || []).length;
+  const aperturasEmp         = (state.aperturasCaja || [])
     .filter(a => a.tipo !== 'registro').length;
-  const esperado     = comprobantes + aperturasEmp;
-  const diff         = aperturasBat - esperado;   // 0 = cuadra
+  const aperturasEmpRegistro = (state.aperturasCaja || [])
+    .filter(a => a.tipo === 'registro').length;
+  const esperado = comprobantes + aperturasEmp;
+  const diff     = aperturasBat - esperado;   // 0 = cuadra
+  const regNote  = aperturasEmpRegistro > 0 ? ` (+ ${aperturasEmpRegistro} solo registro)` : '';
 
   if (!Array.isArray(state.rcRegistros)) state.rcRegistros = [];
-  state.rcRegistros.push({ aperturasBat, aperturasEmp, comprobantes, fecha: new Date().toISOString() });
+  state.rcRegistros.push({
+    aperturasBat, aperturasEmp, aperturasEmpRegistro, comprobantes,
+    fecha: new Date().toISOString(),
+  });
   saveState();
   _rcRenderRegistros();
   if (input) input.value = '';
 
   if (diff === 0) {
-    _rcSetMsg(`✔ Cuadra: ${aperturasBat} bat = ${comprobantes} comprobantes + ${aperturasEmp} empleado.`, false);
+    _rcSetMsg(`✔ Cuadra: ${aperturasBat} bat = ${comprobantes} comprobantes + ${aperturasEmp} empleado${regNote}.`, false);
   } else if (diff > 0) {
-    _rcSetMsg(`⚠ Faltan ${diff} — bat: ${aperturasBat}, comprobantes: ${comprobantes}, empleado: ${aperturasEmp} (suma: ${esperado}).`, false);
+    _rcSetMsg(`⚠ Faltan ${diff} — bat: ${aperturasBat}, comprobantes: ${comprobantes}, empleado: ${aperturasEmp}${regNote} (suma: ${esperado}).`, false);
   } else {
-    _rcSetMsg(`⚠ Sobran ${Math.abs(diff)} — bat: ${aperturasBat}, comprobantes: ${comprobantes}, empleado: ${aperturasEmp} (suma: ${esperado}).`, false);
+    _rcSetMsg(`⚠ Sobran ${Math.abs(diff)} — bat: ${aperturasBat}, comprobantes: ${comprobantes}, empleado: ${aperturasEmp}${regNote} (suma: ${esperado}).`, false);
   }
 }
 
@@ -2221,6 +2237,7 @@ function _rcRenderRegistros() {
         const hora     = new Date(r.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit' });
         const bat      = r.aperturasBat ?? r.aperturas ?? 0;
         const emp      = r.aperturasEmp ?? 0;
+        const empReg   = r.aperturasEmpRegistro ?? 0;
         const comp     = r.comprobantes ?? 0;
         const esperado = comp + emp;
         const diff     = bat - esperado;
@@ -2229,6 +2246,9 @@ function _rcRenderRegistros() {
         const estado   = diff === 0
           ? 'Cuadra'
           : diff > 0 ? `Faltan ${diff}` : `Sobran ${Math.abs(diff)}`;
+        const regNote  = empReg > 0
+          ? ` <span style="color:#6b7280">(+ ${empReg} solo registro)</span>`
+          : '';
         return `<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
           <div style="display:flex;justify-content:space-between;align-items:flex-start">
             <div>
@@ -2240,7 +2260,7 @@ function _rcRenderRegistros() {
                      font-size:15px;padding:0 4px;line-height:1" title="Eliminar">✕</button>
           </div>
           <div style="color:#374151;font-size:12px;margin-top:3px">
-            Bat: <b>${bat}</b> = Comprobantes: <b>${comp}</b> + Empleado: <b>${emp}</b>
+            Bat: <b>${bat}</b> = Comprobantes: <b>${comp}</b> + Empleado: <b>${emp}</b>${regNote}
             ${diff !== 0 ? `<span style="color:${color}"> (suma: ${esperado})</span>` : ''}
           </div>
         </div>`;
