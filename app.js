@@ -1815,7 +1815,7 @@ async function getEgresosCajaDelMes(mes) {
       (d.eventos || []).forEach(ev => {
         if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
             (ev.fecha || '').startsWith(mes))
-          results.push({ ...ev, cajaNombre: d.cajaNombre || '', _source: 'historial', _docId: doc.id });
+          results.push({ ...ev, cajaNombre: d.cajaNombre || '', _cajaId: d.cajaId || doc.id });
       });
     });
   } catch(e) { console.warn('getEgresosCaja historial:', e); }
@@ -1828,7 +1828,7 @@ async function getEgresosCajaDelMes(mes) {
       (d.eventos || []).forEach(ev => {
         if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
             (ev.fecha || '').startsWith(mes))
-          results.push({ ...ev, cajaNombre: d.nombre || '', _source: 'cajas', _docId: doc.id });
+          results.push({ ...ev, cajaNombre: d.nombre || '', _cajaId: doc.id });
       });
     });
   } catch(e) { console.warn('getEgresosCaja cajas:', e); }
@@ -1844,6 +1844,13 @@ async function refreshEgresosCaja() {
   _renderEgresosCajaList();
 }
 
+function _egresoExcluidoKey(cajaId, evId) { return `${cajaId || ''}::${evId}`; }
+
+function _getEgresosCajaVisibles() {
+  const excl = new Set((_flujoDocCache.egresosExcluidos || []));
+  return _egresoscajaCache.filter(e => !excl.has(_egresoExcluidoKey(e._cajaId, e.id)));
+}
+
 function _getFlujoTotals() {
   const d = _flujoDocCache;
   const vHist = d.ventasHistorial  || {};
@@ -1855,7 +1862,7 @@ function _getFlujoTotals() {
   const ventas   = lastV ? (vHist[lastV] || 0) : 0;
   const planilla = lastP ? (pHist[lastP] || 0) : 0;
   const totalPagos      = (d.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
-  const totalEgresosCaja = _egresoscajaCache.reduce((s, e) => s + (e.monto || 0), 0);
+  const totalEgresosCaja = _getEgresosCajaVisibles().reduce((s, e) => s + (e.monto || 0), 0);
   const totalEgresos = round2(planilla + totalPagos + totalEgresosCaja);
   const utilidad     = round2(ventas - totalEgresos);
 
@@ -1926,11 +1933,12 @@ function _renderPagosList() {
 function _renderEgresosCajaList() {
   const el = document.getElementById('flujoEgresosCajaList');
   if (!el) return;
-  if (!_egresoscajaCache.length) {
+  const visibles = _getEgresosCajaVisibles();
+  if (!visibles.length) {
     el.innerHTML = '<p class="no-data" style="padding:20px 0">No hay egresos de caja incluidos en este mes.</p>';
     return;
   }
-  el.innerHTML = _egresoscajaCache.map(e => `
+  el.innerHTML = visibles.map(e => `
     <div class="flujo-pago-item">
       <div class="flujo-pago-info">
         <span class="flujo-pago-cat">${escHtml(e.cajaNombre || 'Caja')}</span>
@@ -1939,7 +1947,7 @@ function _renderEgresosCajaList() {
       </div>
       <div class="flujo-pago-right">
         <span class="flujo-pago-monto">− ${fmt(e.monto)}</span>
-        <button class="btn-ev-del" onclick="deleteEgresoCaja('${escHtml(e._source || '')}','${escHtml(e._docId || '')}','${escHtml(String(e.id))}')" title="Eliminar">✕</button>
+        <button class="btn-ev-del" onclick="excluirEgresoDelFlujo('${escHtml(e._cajaId || '')}','${escHtml(String(e.id))}')" title="Quitar del flujo del mes">✕</button>
       </div>
     </div>`).join('');
 }
@@ -1995,34 +2003,24 @@ async function deletePago(id) {
   } catch(e) { console.error('deletePago:', e); }
 }
 
-async function deleteEgresoCaja(source, docId, evId) {
-  if (!source || !docId || !evId) return;
+async function excluirEgresoDelFlujo(cajaId, evId) {
+  if (!evId) return;
   const item = _egresoscajaCache.find(e =>
-    String(e.id) === String(evId) && e._docId === docId && e._source === source);
+    String(e.id) === String(evId) && (e._cajaId || '') === cajaId);
   const label = item ? `${item.desc || 'Egreso'} (${fmt(item.monto)})` : 'este egreso';
-  if (!confirm(`¿Eliminar ${label} de la caja "${item ? (item.cajaNombre || 'Caja') : ''}"?`)) return;
+  if (!confirm(`¿Quitar ${label} del flujo de este mes? El egreso seguirá registrado en su caja.`)) return;
+  const key = _egresoExcluidoKey(cajaId, evId);
+  const actuales = Array.isArray(_flujoDocCache.egresosExcluidos) ? _flujoDocCache.egresosExcluidos : [];
+  if (actuales.includes(key)) return;
+  const egresosExcluidos = [...actuales, key];
   try {
-    const ref = source === 'historial' ? historialCol.doc(docId) : db.collection('cajas').doc(docId);
-    const snap = await ref.get();
-    if (!snap.exists) { alert('No se encontró el registro.'); return; }
-    const data = snap.data();
-    const eventos = (data.eventos || []).filter(ev => String(ev.id) !== String(evId));
-    await ref.set({ eventos }, { merge: true });
-
-    // Si el egreso pertenece a la caja activa cargada en memoria, mantener sincronía
-    if (source === 'cajas' && docId === currentCajaId) {
-      state.eventos = (state.eventos || []).filter(ev => String(ev.id) !== String(evId));
-      if (typeof renderEventos === 'function') renderEventos();
-      if (typeof calcularEsperado === 'function') calcularEsperado();
-    }
-
-    _egresoscajaCache = _egresoscajaCache.filter(e =>
-      !(String(e.id) === String(evId) && e._docId === docId && e._source === source));
-    _renderFlujoDashboard();
-    _renderEgresosCajaList();
+    await flujoRef(_currentFlujoMes).set(
+      { mes: _currentFlujoMes, egresosExcluidos },
+      { merge: true }
+    );
   } catch(e) {
-    console.error('deleteEgresoCaja:', e);
-    alert('No se pudo eliminar el egreso.');
+    console.error('excluirEgresoDelFlujo:', e);
+    alert('No se pudo quitar el egreso del flujo.');
   }
 }
 
