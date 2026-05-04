@@ -482,6 +482,7 @@ function _registrarAperturaCaja({ motivo, tipo }) {
   state.aperturasCaja.push({ motivo, tipo, fecha: new Date().toISOString() });
   saveState();
   _renderAperturasCaja();
+  _rcRenderAperturasEmp();
 }
 
 function _validarMotivoApertura() {
@@ -2146,7 +2147,25 @@ function openReporteCaja() {
   showView('reporteCaja');
   document.getElementById('rcFormComprobantes').style.display = 'none';
   _rcSetMsg('Ejecuta <b>REPORTE CAJA.bat</b> y luego haz clic en <b>&#9658; Iniciar Reporte</b>.', false);
+  _rcRenderAperturasEmp();
   _rcRenderRegistros();
+}
+
+function _rcRenderAperturasEmp() {
+  const el = document.getElementById('rcAperturasEmpList');
+  if (!el) return;
+  const lista = (state.aperturasCaja || []).filter(a => a.tipo !== 'registro');
+  if (lista.length === 0) {
+    el.innerHTML = '<span style="color:#9ca3af">Sin aperturas registradas hoy.</span>';
+    return;
+  }
+  el.innerHTML = lista.map((a, i) => {
+    const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return `<div style="padding:5px 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between">
+      <span style="color:#374151">${i+1}. ${escHtml(a.motivo)}</span>
+      <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
+    </div>`;
+  }).join('') + `<div style="padding-top:6px;font-weight:600;color:#1a6b3c">Total: ${lista.length}</div>`;
 }
 
 function _rcSetMsg(html, spinner) {
