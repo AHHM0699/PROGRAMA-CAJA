@@ -1815,7 +1815,7 @@ async function getEgresosCajaDelMes(mes) {
       (d.eventos || []).forEach(ev => {
         if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
             (ev.fecha || '').startsWith(mes))
-          results.push({ ...ev, cajaNombre: d.cajaNombre || '' });
+          results.push({ ...ev, cajaNombre: d.cajaNombre || '', _source: 'historial', _docId: doc.id });
       });
     });
   } catch(e) { console.warn('getEgresosCaja historial:', e); }
@@ -1828,7 +1828,7 @@ async function getEgresosCajaDelMes(mes) {
       (d.eventos || []).forEach(ev => {
         if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
             (ev.fecha || '').startsWith(mes))
-          results.push({ ...ev, cajaNombre: d.nombre || '' });
+          results.push({ ...ev, cajaNombre: d.nombre || '', _source: 'cajas', _docId: doc.id });
       });
     });
   } catch(e) { console.warn('getEgresosCaja cajas:', e); }
@@ -1939,6 +1939,7 @@ function _renderEgresosCajaList() {
       </div>
       <div class="flujo-pago-right">
         <span class="flujo-pago-monto">− ${fmt(e.monto)}</span>
+        <button class="btn-ev-del" onclick="deleteEgresoCaja('${escHtml(e._source || '')}','${escHtml(e._docId || '')}','${escHtml(String(e.id))}')" title="Eliminar">✕</button>
       </div>
     </div>`).join('');
 }
@@ -1992,6 +1993,37 @@ async function deletePago(id) {
   try {
     await flujoRef(_currentFlujoMes).set({ pagos }, { merge: true });
   } catch(e) { console.error('deletePago:', e); }
+}
+
+async function deleteEgresoCaja(source, docId, evId) {
+  if (!source || !docId || !evId) return;
+  const item = _egresoscajaCache.find(e =>
+    String(e.id) === String(evId) && e._docId === docId && e._source === source);
+  const label = item ? `${item.desc || 'Egreso'} (${fmt(item.monto)})` : 'este egreso';
+  if (!confirm(`¿Eliminar ${label} de la caja "${item ? (item.cajaNombre || 'Caja') : ''}"?`)) return;
+  try {
+    const ref = source === 'historial' ? historialCol.doc(docId) : db.collection('cajas').doc(docId);
+    const snap = await ref.get();
+    if (!snap.exists) { alert('No se encontró el registro.'); return; }
+    const data = snap.data();
+    const eventos = (data.eventos || []).filter(ev => String(ev.id) !== String(evId));
+    await ref.set({ eventos }, { merge: true });
+
+    // Si el egreso pertenece a la caja activa cargada en memoria, mantener sincronía
+    if (source === 'cajas' && docId === currentCajaId) {
+      state.eventos = (state.eventos || []).filter(ev => String(ev.id) !== String(evId));
+      if (typeof renderEventos === 'function') renderEventos();
+      if (typeof calcularEsperado === 'function') calcularEsperado();
+    }
+
+    _egresoscajaCache = _egresoscajaCache.filter(e =>
+      !(String(e.id) === String(evId) && e._docId === docId && e._source === source));
+    _renderFlujoDashboard();
+    _renderEgresosCajaList();
+  } catch(e) {
+    console.error('deleteEgresoCaja:', e);
+    alert('No se pudo eliminar el egreso.');
+  }
 }
 
 // ── Charts ───────────────────────────────────────────────────
