@@ -1904,6 +1904,7 @@ function _renderFlujoDashboard() {
   }
 
   _renderPagosList();
+  _renderEgresosCajaList();
   _updateFlujoCharts(ventas, planilla, totalPagos, totalEgresosCaja, utilidad, vHist);
 }
 
