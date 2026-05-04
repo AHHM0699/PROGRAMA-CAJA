@@ -2231,9 +2231,6 @@ async function iniciarReporteCaja() {
     const aperturasBat = cajaTimes.length;
     const aperturasEmp = (state.aperturasCaja || []).length;
 
-    const win = window.open(SAS_REPORTE_URL, '_blank');
-    if (win) win.focus();
-
     if (aperturasBat === 0) {
       _rcSetMsg(`Sin aperturas registradas en TROEFAE para el ${fecha}.`, false);
       document.getElementById('rcFormComprobantes').style.display = 'none';
