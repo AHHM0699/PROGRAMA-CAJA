@@ -183,7 +183,6 @@ function _applyRoleUI() {
   document.getElementById('empleadoBadge').classList.toggle('hidden', !isEmp);
   document.getElementById('btnHistorial').classList.toggle('hidden', isEmp);
   document.getElementById('btnFlujo').classList.toggle('hidden', isEmp);
-  document.getElementById('btnReporte').classList.toggle('hidden', isEmp);
   document.getElementById('btnCajas').classList.toggle('hidden', false);
 }
 
@@ -387,14 +386,14 @@ function showView(view) {
   if (userRole === 'employee') { _showEmployeeView(); return; }
   if (view === 'auto') view = state.cajaAbierta ? 'cierre' : 'apertura';
 
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo','viewReporteCaja'].forEach(id =>
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   const cap = view.charAt(0).toUpperCase() + view.slice(1);
   document.getElementById('view' + cap).classList.remove('hidden');
 
   if (view === 'apertura') prefillInicialDenoms();
-  if (view === 'cierre')   { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); }
+  if (view === 'cierre')   { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); openReporteCaja(); }
   if (view === 'reportes') renderReportes();
 }
 
@@ -1084,6 +1083,11 @@ function calcularDiferencia() {
 //  CLOSE CASH & GENERATE PDF
 // ============================================================
 function confirmarCierre() {
+  if (!_rcReporteHecho()) {
+    _rcSetMsg('⚠ Debes completar el Reporte de Caja antes de cerrar.', false);
+    document.getElementById('rcCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
   const esperado  = getEsperado();
   const real      = getCajaFinal();
   const diferencia = round2(real - esperado);
@@ -1107,6 +1111,11 @@ function closeCierreConfirm() {
 }
 
 async function generarArqueo() {
+  if (!_rcReporteHecho()) {
+    _rcSetMsg('⚠ Debes completar el Reporte de Caja antes de generar el arqueo.', false);
+    document.getElementById('rcCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
   const ventasFinal      = parseFloat(document.getElementById('ventasFinal').value) || 0;
   const totalYapes       = getTotalYapes();
   const yapesList        = getYapesList();
@@ -2144,20 +2153,38 @@ function tryParseJSON(str, fallback) {
 let _rcCajaTimes = [];
 const SAS_REPORTE_URL = 'https://cheplast.organizatic.com/principal#/reportes/ventas';
 
+function _rcReporteHecho() {
+  const hoy = _todayPE();
+  return (state.rcRegistros || []).some(r => r.fecha && r.fecha.startsWith(hoy));
+}
+
+function _rcActualizarBadge() {
+  const badge = document.getElementById('rcEstadoBadge');
+  if (!badge) return;
+  if (_rcReporteHecho()) {
+    badge.textContent = '✔ Completado';
+    badge.style.background = '#dcfce7';
+    badge.style.color = '#166534';
+  } else {
+    badge.textContent = 'Pendiente';
+    badge.style.background = '#f3f4f6';
+    badge.style.color = '#6b7280';
+  }
+}
+
 async function openReporteCaja() {
-  showView('reporteCaja');
+  // Ya no navega a vista separada — sección inline en viewCierre
   document.getElementById('rcFormComprobantes').style.display = 'none';
-  // Poner fecha de hoy en el picker
   const picker = document.getElementById('rcFechaPicker');
   if (picker) {
     const hoy = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
     picker.max   = hoy;
     picker.value = hoy;
   }
-  _rcSetMsg('Selecciona la fecha y haz clic en <b>&#9658; Iniciar Reporte</b>.', false);
-  await _loadStateFromFirestore();
+  _rcSetMsg('Haz clic en <b>&#9658; Iniciar Reporte</b> para obtener los datos de TROEFAE.', false);
   _rcRenderAperturasEmp();
   _rcRenderRegistros();
+  _rcActualizarBadge();
 }
 
 function _rcRenderAperturasEmp() {
@@ -2268,6 +2295,7 @@ function rcRegistrarComprobantes() {
   state.rcRegistros.push({ aperturasBat, aperturasEmp, comprobantes, fecha: new Date().toISOString() });
   saveState();
   _rcRenderRegistros();
+  _rcActualizarBadge();
   if (input) input.value = '';
 
   if (diff === 0) {

@@ -58,7 +58,6 @@
       <button id="btnCajas" class="btn btn-ghost hidden" onclick="showCajaSelector()">⇄ Cajas</button>
       <button id="btnFlujo" class="btn btn-ghost hidden" onclick="showFlujoView()">📊 Flujo</button>
       <button id="btnHistorial" class="btn btn-ghost" onclick="showView('reportes')">📋 Historial</button>
-      <button id="btnReporte" class="btn btn-ghost hidden" onclick="openReporteCaja()">📊 Reporte</button>
       <button class="btn btn-outline-white btn-sm" onclick="logout()">Salir</button>
     </div>
   </header>
@@ -278,7 +277,57 @@
         </div>
       </div>
 
-      <div class="form-actions">
+      <!-- ── Reporte de Caja (obligatorio) ────────────── -->
+      <div class="card" style="margin-top:24px;border:2px solid #e5e7eb" id="rcCard">
+        <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+          <h3>📊 Reporte de Caja <span style="color:#dc2626;font-size:11px;font-weight:400">● requerido para cerrar</span></h3>
+          <span id="rcEstadoBadge" style="font-size:12px;padding:3px 10px;border-radius:12px;background:#f3f4f6;color:#6b7280;font-weight:600">Pendiente</span>
+        </div>
+        <div class="card-body" style="padding:14px 16px">
+
+          <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
+            <label for="rcFechaPicker" style="font-size:13px;color:#374151;font-weight:600;white-space:nowrap">Fecha:</label>
+            <input id="rcFechaPicker" type="date" class="form-control" style="max-width:160px;border-radius:6px;font-size:13px">
+          </div>
+
+          <div id="rcEstado" style="margin-bottom:12px">
+            <div id="rcMensaje" style="font-size:13px;color:#6b7280">
+              Haz clic en <b>▶ Iniciar Reporte</b> para obtener los datos de TROEFAE.
+            </div>
+            <div id="rcSpinner" style="display:none;margin-top:8px;display:flex;align-items:center;gap:6px">
+              <span class="sync-spinner"></span>
+              <span id="rcSpinnerTxt" style="font-size:13px;color:#6b7280">Consultando TROEFAE…</span>
+            </div>
+          </div>
+
+          <div id="rcAperturasEmpCard" style="margin-bottom:12px">
+            <div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Aperturas del empleado</div>
+            <div id="rcAperturasEmpList" style="font-size:13px;color:#6b7280">Sin aperturas registradas.</div>
+          </div>
+
+          <div id="rcFormComprobantes" style="display:none;margin-bottom:12px;padding:10px 12px;background:#f9fafb;border-radius:8px">
+            <p id="rcAperturasInfo" style="font-size:13px;font-weight:600;color:#1a6b3c;margin:0 0 8px"></p>
+            <p style="font-size:13px;color:#374151;margin:0 0 8px">Ingresa cuántos comprobantes hay en el SAS:</p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input id="rcInputComprobantes" type="number" min="0" class="form-control"
+                placeholder="Cantidad de comprobantes"
+                style="max-width:200px;border-radius:6px;font-size:13px"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();rcRegistrarComprobantes()}">
+              <button class="btn btn-primary btn-sm" onclick="rcRegistrarComprobantes()">Registrar</button>
+            </div>
+          </div>
+
+          <div id="rcRegistrosList" style="margin-bottom:10px"></div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-success btn-sm" id="btnIniciarReporte" onclick="iniciarReporteCaja()">▶ Iniciar Reporte</button>
+            <a class="btn btn-secondary btn-sm" href="https://cheplast.organizatic.com/principal#/reportes/ventas" target="_blank">📋 Abrir SAS</a>
+          </div>
+
+        </div>
+      </div><!-- /rcCard -->
+
+      <div class="form-actions" style="margin-top:16px">
         <button class="btn btn-secondary btn-lg" onclick="generarArqueo()">📊 Arqueo parcial</button>
         <button class="btn btn-success btn-lg" onclick="confirmarCierre()">📄 Cerrar Caja</button>
       </div>
@@ -576,68 +625,6 @@
     </div><!-- /viewFlujo -->
 
 
-    <!-- ========== VISTA: REPORTE DE CAJA ========== -->
-    <div id="viewReporteCaja" class="view hidden">
-      <div class="section-header-row">
-        <div>
-          <h2>📊 Reporte de Caja</h2>
-          <p class="section-sub">Aperturas de gaveta vs. comprobantes del SAS</p>
-        </div>
-        <button class="btn btn-secondary btn-sm" onclick="showView('auto')">← Volver</button>
-      </div>
-
-      <!-- Selector de fecha -->
-      <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px">
-        <label for="rcFechaPicker" style="font-size:14px;color:#374151;font-weight:600;white-space:nowrap">Fecha:</label>
-        <input id="rcFechaPicker" type="date" class="form-control" style="max-width:180px;border-radius:6px">
-      </div>
-
-      <!-- Estado / progreso -->
-      <div id="rcEstado" class="card" style="margin-bottom:18px">
-        <div class="card-body" style="padding:20px 18px">
-          <div id="rcMensaje" style="font-size:14px;color:#6b7280;text-align:center">
-            Selecciona la fecha y haz clic en <b>▶ Iniciar Reporte</b>.
-          </div>
-          <div id="rcSpinner" style="display:none;text-align:center;margin-top:12px">
-            <span class="sync-spinner"></span>
-            <span id="rcSpinnerTxt" style="font-size:13px;color:#6b7280;margin-left:6px">Leyendo…</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Aperturas del empleado (siempre visible) -->
-      <div id="rcAperturasEmpCard" class="card" style="margin-bottom:18px">
-        <div class="card-head"><h3>Aperturas del empleado</h3></div>
-        <div class="card-body" style="padding:10px 16px">
-          <div id="rcAperturasEmpList" style="font-size:13px;color:#6b7280">Sin aperturas registradas.</div>
-        </div>
-      </div>
-
-      <!-- Formulario de comprobantes (aparece tras leer clipboard) -->
-      <div id="rcFormComprobantes" class="card" style="display:none;margin-bottom:18px">
-        <div class="card-head"><h3>Comprobantes del SAS</h3></div>
-        <div class="card-body">
-          <p id="rcAperturasInfo" style="font-size:14px;font-weight:600;color:#1a6b3c;margin:0 0 10px"></p>
-          <p style="font-size:13px;color:#374151;margin:0 0 10px">
-            Revisa el reporte de ventas en el SAS e ingresa cuántos comprobantes hay hoy:
-          </p>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input id="rcInputComprobantes" type="number" min="0" class="form-control"
-              placeholder="Cantidad de comprobantes"
-              style="max-width:220px;border-radius:6px"
-              onkeydown="if(event.key==='Enter'){event.preventDefault();rcRegistrarComprobantes()}">
-            <button class="btn btn-primary" onclick="rcRegistrarComprobantes()">Registrar</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Lista de registros guardados -->
-      <div id="rcRegistrosList" style="margin-bottom:8px"></div>
-
-      <div class="form-actions" style="margin-top:8px">
-        <button class="btn btn-success btn-lg" id="btnIniciarReporte" onclick="iniciarReporteCaja()">▶ Iniciar Reporte</button>
-      </div>
-    </div><!-- /viewReporteCaja -->
 
   </div><!-- /app-content -->
 </div><!-- /mainApp -->
