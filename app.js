@@ -2144,10 +2144,11 @@ function tryParseJSON(str, fallback) {
 let _rcCajaTimes = [];
 const SAS_REPORTE_URL = 'https://cheplast.organizatic.com/principal#/reportes/ventas';
 
-function openReporteCaja() {
+async function openReporteCaja() {
   showView('reporteCaja');
   document.getElementById('rcFormComprobantes').style.display = 'none';
   _rcSetMsg('Ejecuta <b>REPORTE CAJA.bat</b> y luego haz clic en <b>&#9658; Iniciar Reporte</b>.', false);
+  await _loadStateFromFirestore();
   _rcRenderAperturasEmp();
   _rcRenderRegistros();
 }
