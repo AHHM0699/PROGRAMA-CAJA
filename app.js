@@ -451,9 +451,10 @@ function _renderEmpYapesList() {
 
 function refreshCurrentView() {
   const views = {
-    viewCierre:   () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
-    viewEmpleado: () => _showEmployeeView(),
-    viewApertura: () => prefillInicialDenoms(),
+    viewCierre:      () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
+    viewEmpleado:    () => _showEmployeeView(),
+    viewApertura:    () => prefillInicialDenoms(),
+    viewReporteCaja: () => { _rcRenderAperturasEmp(); _rcRenderRegistros(); },
   };
   for (const [id, fn] of Object.entries(views)) {
     if (!document.getElementById(id)?.classList.contains('hidden')) { fn(); break; }
