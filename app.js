@@ -2154,7 +2154,7 @@ function openReporteCaja() {
 function _rcRenderAperturasEmp() {
   const el = document.getElementById('rcAperturasEmpList');
   if (!el) return;
-  const lista = (state.aperturasCaja || []).filter(a => a.tipo !== 'registro');
+  const lista = (state.aperturasCaja || []);
   if (lista.length === 0) {
     el.innerHTML = '<span style="color:#9ca3af">Sin aperturas registradas hoy.</span>';
     return;
@@ -2197,8 +2197,7 @@ async function iniciarReporteCaja() {
   _rcCajaTimes = cajaTimes || [];
 
   const aperturasBat = _rcCajaTimes.length;
-  const aperturasEmp = (state.aperturasCaja || [])
-    .filter(a => a.tipo !== 'registro').length;
+  const aperturasEmp = (state.aperturasCaja || []).length;
 
   // Abrir SAS para que el usuario genere el reporte manualmente
   const win = window.open(SAS_REPORTE_URL, '_blank');
@@ -2232,8 +2231,7 @@ function rcRegistrarComprobantes() {
   if (isNaN(comprobantes) || comprobantes < 0) { if (input) input.focus(); return; }
 
   const aperturasBat = (_rcCajaTimes || []).length;
-  const aperturasEmp = (state.aperturasCaja || [])
-    .filter(a => a.tipo !== 'registro').length;
+  const aperturasEmp = (state.aperturasCaja || []).length;
   const esperado     = comprobantes + aperturasEmp;
   const diff         = aperturasBat - esperado;   // 0 = cuadra
 
