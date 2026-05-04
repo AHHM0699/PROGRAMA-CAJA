@@ -586,11 +586,17 @@
         <button class="btn btn-secondary btn-sm" onclick="showView('auto')">← Volver</button>
       </div>
 
+      <!-- Selector de fecha -->
+      <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px">
+        <label for="rcFechaPicker" style="font-size:14px;color:#374151;font-weight:600;white-space:nowrap">Fecha:</label>
+        <input id="rcFechaPicker" type="date" class="form-control" style="max-width:180px;border-radius:6px">
+      </div>
+
       <!-- Estado / progreso -->
       <div id="rcEstado" class="card" style="margin-bottom:18px">
         <div class="card-body" style="padding:20px 18px">
           <div id="rcMensaje" style="font-size:14px;color:#6b7280;text-align:center">
-            Ejecuta <b>REPORTE CAJA.bat</b> y luego haz clic en <b>▶ Iniciar Reporte</b>.
+            Selecciona la fecha y haz clic en <b>▶ Iniciar Reporte</b>.
           </div>
           <div id="rcSpinner" style="display:none;text-align:center;margin-top:12px">
             <span class="sync-spinner"></span>

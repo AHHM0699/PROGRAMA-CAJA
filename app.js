@@ -2147,7 +2147,14 @@ const SAS_REPORTE_URL = 'https://cheplast.organizatic.com/principal#/reportes/ve
 async function openReporteCaja() {
   showView('reporteCaja');
   document.getElementById('rcFormComprobantes').style.display = 'none';
-  _rcSetMsg('Ejecuta <b>REPORTE CAJA.bat</b> y luego haz clic en <b>&#9658; Iniciar Reporte</b>.', false);
+  // Poner fecha de hoy en el picker
+  const picker = document.getElementById('rcFechaPicker');
+  if (picker) {
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+    picker.max   = hoy;
+    picker.value = hoy;
+  }
+  _rcSetMsg('Selecciona la fecha y haz clic en <b>&#9658; Iniciar Reporte</b>.', false);
   await _loadStateFromFirestore();
   _rcRenderAperturasEmp();
   _rcRenderRegistros();
@@ -2175,56 +2182,79 @@ function _rcSetMsg(html, spinner) {
   document.getElementById('rcSpinner').style.display = spinner ? '' : 'none';
 }
 
+let _rcUnsubscribe = null;
+
 async function iniciarReporteCaja() {
   const btn = document.getElementById('btnIniciarReporte');
   btn.disabled = true;
-  _rcSetMsg('Leyendo portapapeles…', true);
 
-  let txt = '';
+  // Cancelar listener anterior si existe
+  if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
+
+  const picker = document.getElementById('rcFechaPicker');
+  const fecha  = picker?.value || _todayPE();
+
+  _rcSetMsg('Enviando solicitud a TROEFAE…', true);
+
+  // Escribir solicitud en Firestore para que TROEFAE la procese
   try {
-    txt = await navigator.clipboard.readText();
-  } catch(e) { txt = ''; }
-
-  let parsed = null;
-  try { parsed = JSON.parse(txt); } catch(e) {}
-
-  // Aceptar array de HH:MM:SS o {cajaTimes:[...], ...}
-  let cajaTimes = null;
-  if (Array.isArray(parsed) && parsed.length > 0 && /^\d{2}:\d{2}(:\d{2})?$/.test(parsed[0])) {
-    cajaTimes = parsed;
-  } else if (parsed?.cajaTimes && Array.isArray(parsed.cajaTimes)) {
-    cajaTimes = parsed.cajaTimes;
-  }
-
-  _rcCajaTimes = cajaTimes || [];
-
-  const aperturasBat = _rcCajaTimes.length;
-  const aperturasEmp = (state.aperturasCaja || []).length;
-
-  // Abrir SAS para que el usuario genere el reporte manualmente
-  const win = window.open(SAS_REPORTE_URL, '_blank');
-  if (win) win.focus();
-
-  if (aperturasBat === 0) {
-    _rcSetMsg('No se encontraron datos del .bat en el portapapeles. Ejecuta <b>REPORTE CAJA.bat</b> primero.', false);
-    document.getElementById('rcFormComprobantes').style.display = 'none';
+    await db.doc('requests/reporte-caja').set({
+      fecha,
+      status: 'pending',
+      requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch(e) {
+    _rcSetMsg('Error al conectar con Firestore. Verifica tu conexión.', false);
     btn.disabled = false;
     return;
   }
 
-  _rcSetMsg(`✔ Datos leídos. El SAS se abrió — genera el reporte e ingresa los comprobantes abajo.`, false);
+  _rcSetMsg('Esperando respuesta de TROEFAE…', true);
 
-  const info = document.getElementById('rcAperturasInfo');
-  if (info) {
-    info.innerHTML =
-      `Total aperturas (.bat): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
-      `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
-  }
-  document.getElementById('rcFormComprobantes').style.display = '';
-  const input = document.getElementById('rcInputComprobantes');
-  if (input) { input.value = ''; input.focus(); }
+  // Escuchar resultado en tiempo real (onSnapshot)
+  const timeout = setTimeout(() => {
+    if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
+    _rcSetMsg('TROEFAE no respondió. Verifica que esté encendida y con el watcher activo.', false);
+    btn.disabled = false;
+  }, 30000); // 30 segundos de espera máxima
 
-  btn.disabled = false;
+  _rcUnsubscribe = db.doc(`reporteCaja/${fecha}`).onSnapshot(snap => {
+    if (!snap.exists) return; // aún no llegó el resultado
+
+    clearTimeout(timeout);
+    if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
+
+    const data      = snap.data();
+    const cajaTimes = Array.isArray(data.times) ? data.times : [];
+
+    _rcCajaTimes = cajaTimes;
+    const aperturasBat = cajaTimes.length;
+    const aperturasEmp = (state.aperturasCaja || []).length;
+
+    const win = window.open(SAS_REPORTE_URL, '_blank');
+    if (win) win.focus();
+
+    if (aperturasBat === 0) {
+      _rcSetMsg(`Sin aperturas registradas en TROEFAE para el ${fecha}.`, false);
+      document.getElementById('rcFormComprobantes').style.display = 'none';
+      btn.disabled = false;
+      return;
+    }
+
+    _rcSetMsg(`✔ ${aperturasBat} apertura(s) obtenidas de TROEFAE. El SAS se abrió — ingresa los comprobantes abajo.`, false);
+
+    const info = document.getElementById('rcAperturasInfo');
+    if (info) {
+      info.innerHTML =
+        `Total aperturas (TROEFAE): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
+        `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
+    }
+    document.getElementById('rcFormComprobantes').style.display = '';
+    const input = document.getElementById('rcInputComprobantes');
+    if (input) { input.value = ''; input.focus(); }
+
+    btn.disabled = false;
+  });
 }
 
 function rcRegistrarComprobantes() {
