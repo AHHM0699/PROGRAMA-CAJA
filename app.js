@@ -409,7 +409,7 @@ function showView(view) {
   document.getElementById('view' + cap).classList.remove('hidden');
 
   if (view === 'apertura') prefillInicialDenoms();
-  if (view === 'cierre')   { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); openReporteCaja(); _renderAperturasCaja(); }
+  if (view === 'cierre')   { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); openReporteCaja(); }
   if (view === 'reportes') renderReportes();
 }
 
@@ -467,7 +467,7 @@ function _renderEmpYapesList() {
 
 function refreshCurrentView() {
   const views = {
-    viewCierre:   () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); _renderAperturasCaja(); },
+    viewCierre:   () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
     viewEmpleado: () => _showEmployeeView(),
     viewApertura: () => prefillInicialDenoms(),
   };
@@ -649,22 +649,7 @@ function _renderAperturasCaja() {
 
   const emp   = document.getElementById('empAperturasCajaList');
   const admin = document.getElementById('adminAperturasCajaList');
-  if (emp)   emp.innerHTML   = lista.length === 0 ? '' : html;
-  if (admin) admin.innerHTML = html;
-}
-
-async function refreshAperturasCajaAdmin() {
-  const btn = document.getElementById('btnRefreshAperturas');
-  if (btn) { btn.disabled = true; btn.textContent = '↻ …'; }
-  try {
-    const snap = await cajaRef().get();
-    if (snap.exists) {
-      const remote = snap.data();
-      if ((remote._ts || 0) > (state._ts || 0)) _applyRemoteState(remote);
-    }
-  } catch(e) { console.warn('refresh aperturas:', e); }
-  _renderAperturasCaja();
-  if (btn) { btn.disabled = false; btn.textContent = '↻ Actualizar'; }
+  if (emp) emp.innerHTML = lista.length === 0 ? '' : html;
 }
 
 function addEmpYape() {
@@ -2301,6 +2286,20 @@ async function openReporteCaja() {
   _rcRenderAperturasEmp();
   _rcRenderRegistros();
   _rcActualizarBadge();
+}
+
+async function refreshAperturasEmp() {
+  const btn = document.getElementById('btnRefreshAperturasRc');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ …'; }
+  try {
+    const snap = await cajaRef().get();
+    if (snap.exists) {
+      const remote = snap.data();
+      if ((remote._ts || 0) > (state._ts || 0)) _applyRemoteState(remote);
+    }
+  } catch(e) { console.warn('refresh aperturas:', e); }
+  _rcRenderAperturasEmp();
+  if (btn) { btn.disabled = false; btn.textContent = '↻ Actualizar'; }
 }
 
 function _rcRenderAperturasEmp() {

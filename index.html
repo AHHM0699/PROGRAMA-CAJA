@@ -201,20 +201,6 @@
         <div class="card-body" id="eventosList"></div>
       </div>
 
-      <!-- APERTURAS DE GAVETA -->
-      <div class="card" id="cardAperturasCaja">
-        <div class="card-head">
-          <h3>🔓 Aperturas de gaveta</h3>
-          <button class="btn btn-secondary btn-sm" id="btnRefreshAperturas"
-            onclick="refreshAperturasCajaAdmin()">↻ Actualizar</button>
-        </div>
-        <div class="card-body">
-          <div id="adminAperturasCajaList">
-            <p style="color:#9ca3af;font-size:13px">Sin aperturas registradas.</p>
-          </div>
-        </div>
-      </div>
-
       <!-- PASO 2: Efectivo Esperado -->
       <div class="card card-expected">
         <div class="card-head"><h3><span class="step-num">2</span> Efectivo Esperado en Caja</h3></div>
@@ -332,7 +318,11 @@
           </div>
 
           <div id="rcAperturasEmpCard" style="margin-bottom:12px">
-            <div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Aperturas del empleado</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <span style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em">Aperturas del empleado</span>
+              <button class="btn btn-secondary btn-sm" id="btnRefreshAperturasRc"
+                onclick="refreshAperturasEmp()" style="font-size:11px;padding:2px 8px">↻ Actualizar</button>
+            </div>
             <div id="rcAperturasEmpList" style="font-size:13px;color:#6b7280">Sin aperturas registradas.</div>
           </div>
 
