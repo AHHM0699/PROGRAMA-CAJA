@@ -244,19 +244,19 @@
         <div class="card-head">
           <h3><span class="step-num">3</span> Efectivo Real en Caja</h3>
           <div class="toggle-group">
-            <button class="tgl active" id="tglCierreDenom" onclick="setMode('cierre','denom')">Por denominaciones</button>
-            <button class="tgl" id="tglCierreMonto" onclick="setMode('cierre','monto')">Monto exacto</button>
+            <button class="tgl" id="tglCierreDenom" onclick="setMode('cierre','denom')">Por denominaciones</button>
+            <button class="tgl active" id="tglCierreMonto" onclick="setMode('cierre','monto')">Monto exacto</button>
           </div>
         </div>
         <div class="card-body">
-          <div id="cierreModoDenom">
+          <div id="cierreModoDenom" class="hidden">
             <div id="cierreDenomTable"></div>
             <div class="denom-footer">
               <span>Total Efectivo Real</span>
               <span class="denom-total-val" id="cierreDenomTotal">S/. 0.00</span>
             </div>
           </div>
-          <div id="cierreModoMonto" class="hidden">
+          <div id="cierreModoMonto">
             <label class="field-label">Monto total en caja (S/.)</label>
             <div class="input-wrap">
               <span class="prefix">S/.</span>

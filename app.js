@@ -70,7 +70,7 @@ let globalConfig     = {};        // { lastDenomQtys: [...] }
 let currentCajaId    = null;
 let currentCajaNombre = null;
 
-let cierreMode           = 'denom';
+let cierreMode           = 'monto';
 let userRole             = 'admin';
 let _pipWindow           = null;
 let _unsubscribeSync     = null;
