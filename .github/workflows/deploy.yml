@@ -1,16 +1,11 @@
 name: Deploy to GitHub Pages
-# DESACTIVADO — el hosting se hace exclusivamente via Firebase (firebase.yml)
-# Este workflow queda aqui como referencia pero nunca se ejecuta.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      confirm:
-        description: "Escribe CONFIRMAR para activar deploy a Pages"
-        required: true
 
 jobs:
   deploy:
-    if: ${{ github.event.inputs.confirm == 'CONFIRMAR' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
