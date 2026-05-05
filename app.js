@@ -2289,6 +2289,15 @@ async function openReporteCaja() {
   _rcActualizarBadge();
 }
 
+function toggleListaAperturas() {
+  const lista = document.getElementById('rcAperturasEmpList');
+  const btn   = document.getElementById('btnToggleAperturasRc');
+  if (!lista) return;
+  const visible = lista.style.display !== 'none';
+  lista.style.display = visible ? 'none' : '';
+  if (btn) btn.textContent = visible ? '▼ Ver lista' : '▲ Ocultar';
+}
+
 async function refreshAperturasEmp() {
   const btn = document.getElementById('btnRefreshAperturasRc');
   if (btn) { btn.disabled = true; btn.textContent = '↻ …'; }
