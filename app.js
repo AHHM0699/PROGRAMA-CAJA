@@ -234,9 +234,10 @@ async function showCajaSelector() {
 
   // Ocultar vistas del app, mostrar selector
   document.getElementById('cajaSelectorScreen').style.display = 'flex';
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado'].forEach(id =>
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
+  if (_flujoUnsub) { _flujoUnsub(); _flujoUnsub = null; }
 
   // Solo admin puede abrir nueva caja
   const btnNueva = document.getElementById('btnNuevaCaja');
@@ -365,7 +366,7 @@ function iniciarNuevaCaja() {
   setMode('inicial', 'monto');
   prefillInicialDenoms();
 
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado'].forEach(id =>
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   document.getElementById('viewApertura').classList.remove('hidden');
@@ -450,10 +451,9 @@ function _renderEmpYapesList() {
 
 function refreshCurrentView() {
   const views = {
-    viewCierre:      () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
-    viewEmpleado:    () => _showEmployeeView(),
-    viewApertura:    () => prefillInicialDenoms(),
-    viewReporteCaja: () => { _rcRenderAperturasEmp(); _rcRenderRegistros(); },
+    viewCierre:   () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
+    viewEmpleado: () => _showEmployeeView(),
+    viewApertura: () => prefillInicialDenoms(),
   };
   for (const [id, fn] of Object.entries(views)) {
     if (!document.getElementById(id)?.classList.contains('hidden')) { fn(); break; }
@@ -1829,7 +1829,7 @@ async function getEgresosCajaDelMes(mes) {
       if (d.estado === 'borrador') return;
       (d.eventos || []).forEach(ev => {
         if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
-            (ev.fecha || '').startsWith(mes))
+            ev.fecha && new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(ev.fecha)).startsWith(mes))
           results.push({ ...ev, cajaNombre: d.cajaNombre || '', _cajaId: d.cajaId || doc.id });
       });
     });
@@ -1842,7 +1842,7 @@ async function getEgresosCajaDelMes(mes) {
       const d = doc.data();
       (d.eventos || []).forEach(ev => {
         if (ev.tipo === 'Egreso' && ev.incluirEnFlujo !== false &&
-            (ev.fecha || '').startsWith(mes))
+            ev.fecha && new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(ev.fecha)).startsWith(mes))
           results.push({ ...ev, cajaNombre: d.nombre || '', _cajaId: doc.id });
       });
     });
@@ -2059,7 +2059,7 @@ function _initFlujoCharts() {
     options: {
       responsive: true, maintainAspectRatio: true,
       plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { callback: v => 'S/.' + v.toLocaleString('es-PE', { timeZone: TZ }) } } }
+      scales: { y: { beginAtZero: true, ticks: { callback: v => fmt(v) } } }
     }
   });
 
@@ -2089,7 +2089,7 @@ function _initFlujoCharts() {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { callback: v => 'S/.' + v.toLocaleString('es-PE', { timeZone: TZ }) } } }
+      scales: { y: { beginAtZero: true, ticks: { callback: v => fmt(v) } } }
     }
   });
 }
@@ -2139,7 +2139,7 @@ function resetInactivityTimer()  { /* desactivado */ }
 //  UTILS
 // ============================================================
 function round2(n) { return Math.round(n * 100) / 100; }
-function fmt(n)    { return `S/. ${(+n).toFixed(2)}`; }
+function fmt(n)    { return 'S/. ' + (+n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 function escHtml(str) {
   return String(str)

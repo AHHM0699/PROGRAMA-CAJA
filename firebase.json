@@ -2,6 +2,8 @@
   "hosting": {
     "public": ".",
     "ignore": [
+      ".git/**",
+      ".github/**",
       ".firebase/**",
       ".widget-data/**",
       "firebase.json",
@@ -9,7 +11,11 @@
       "*.ps1",
       "*.vbs",
       "*.ico",
-      "yapes.ico"
+      "yapes.ico",
+      "reporte_ventas.js",
+      "lanzar-yapes.*",
+      "setTopmost-yapes.*",
+      "crear-acceso-directo.ps1"
     ],
     "headers": [
       {
