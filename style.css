@@ -1229,11 +1229,14 @@ kbd {
 
 /* ============ CAJA SELECTOR ============ */
 #cajaSelectorScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
   background: linear-gradient(145deg, #0f3d22 0%, #1a6b3c 50%, #16a34a 100%);
+  overflow-y: auto;
 }
 
 .caja-selector-wrap {
