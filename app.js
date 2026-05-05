@@ -409,7 +409,7 @@ function showView(view) {
   document.getElementById('view' + cap).classList.remove('hidden');
 
   if (view === 'apertura') prefillInicialDenoms();
-  if (view === 'cierre')   { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); openReporteCaja(); }
+  if (view === 'cierre')   { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); openReporteCaja(); _renderAperturasCaja(); }
   if (view === 'reportes') renderReportes();
 }
 
@@ -467,7 +467,7 @@ function _renderEmpYapesList() {
 
 function refreshCurrentView() {
   const views = {
-    viewCierre:   () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
+    viewCierre:   () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); _renderAperturasCaja(); },
     viewEmpleado: () => _showEmployeeView(),
     viewApertura: () => prefillInicialDenoms(),
   };
@@ -626,27 +626,45 @@ function registrarAperturaSinAbrir() {
 }
 
 function _renderAperturasCaja() {
-  const el = document.getElementById('empAperturasCajaList');
-  if (!el) return;
   const lista = state.aperturasCaja || [];
-  if (lista.length === 0) { el.innerHTML = ''; return; }
-  el.innerHTML = lista.map((a, i) => {
-    const d        = new Date(a.fecha);
-    const fecha    = d.toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit' });
-    const hora     = d.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
-    const badge = a.tipo === 'registro'
-      ? '<span style="background:#e5e7eb;color:#374151;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">📝 Registro</span>'
-      : a.tipo === 'fisica-cerrada'
-        ? '<span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada</span>'
-        : '<span style="background:#dcfce7;color:#166534;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔓 Gaveta</span>';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;
-                        padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
-      <span style="color:#374151;min-width:0;overflow:hidden;text-overflow:ellipsis">
-        ${i+1}. ${badge}${escHtml(a.motivo)}
-      </span>
-      <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${fecha} ${hora}</span>
-    </div>`;
-  }).join('');
+  const html = lista.length === 0
+    ? '<p style="color:#9ca3af;font-size:13px">Sin aperturas registradas.</p>'
+    : lista.map((a, i) => {
+        const d     = new Date(a.fecha);
+        const fecha = d.toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit' });
+        const hora  = d.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+        const badge = a.tipo === 'registro'
+          ? '<span style="background:#e5e7eb;color:#374151;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">📝 Registro</span>'
+          : a.tipo === 'fisica-cerrada'
+            ? '<span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada</span>'
+            : '<span style="background:#dcfce7;color:#166534;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔓 Gaveta</span>';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;
+                            padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
+          <span style="color:#374151;min-width:0;overflow:hidden;text-overflow:ellipsis">
+            ${i+1}. ${badge}${escHtml(a.motivo)}
+          </span>
+          <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${fecha} ${hora}</span>
+        </div>`;
+      }).join('');
+
+  const emp   = document.getElementById('empAperturasCajaList');
+  const admin = document.getElementById('adminAperturasCajaList');
+  if (emp)   emp.innerHTML   = lista.length === 0 ? '' : html;
+  if (admin) admin.innerHTML = html;
+}
+
+async function refreshAperturasCajaAdmin() {
+  const btn = document.getElementById('btnRefreshAperturas');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ …'; }
+  try {
+    const snap = await cajaRef().get();
+    if (snap.exists) {
+      const remote = snap.data();
+      if ((remote._ts || 0) > (state._ts || 0)) _applyRemoteState(remote);
+    }
+  } catch(e) { console.warn('refresh aperturas:', e); }
+  _renderAperturasCaja();
+  if (btn) { btn.disabled = false; btn.textContent = '↻ Actualizar'; }
 }
 
 function addEmpYape() {
