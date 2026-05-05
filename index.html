@@ -400,6 +400,27 @@
           <h2>Vista Empleado</h2>
           <p class="section-sub">La caja aún no ha sido abierta hoy. Espera a que el administrador la abra.</p>
         </div>
+        <div class="card" style="max-width:480px;margin:0 auto">
+          <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+            <h3>🔓 Apertura de gaveta</h3>
+            <span id="empCerradaContador" style="font-size:12px;color:#6b7280;font-weight:400"></span>
+          </div>
+          <div class="card-body">
+            <p style="font-size:13px;color:#6b7280;margin-bottom:12px">
+              Puedes abrir la gaveta aunque la caja no esté activa.<br>
+              Máximo <strong>3 veces por día</strong>.
+            </p>
+            <div class="input-group" style="margin-bottom:6px">
+              <input id="posMotivoCC" type="text" class="form-control"
+                placeholder="Motivo de apertura…"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();abrirGavetaCajaCerrada()}">
+              <button id="btnAbrirCC" class="btn-pos" onclick="abrirGavetaCajaCerrada()">
+                🔓 Abrir
+              </button>
+            </div>
+            <span id="empCerradaFeedback" class="feedback-text"></span>
+          </div>
+        </div>
       </div>
 
       <!-- Caja abierta -->

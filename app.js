@@ -239,6 +239,10 @@ async function showCajaSelector() {
   );
   if (_flujoUnsub) { _flujoUnsub(); _flujoUnsub = null; }
 
+  // Bloquear Flujo e Historial hasta que se elija una caja
+  document.getElementById('btnFlujo').classList.add('hidden');
+  document.getElementById('btnHistorial').classList.add('hidden');
+
   // Solo admin puede abrir nueva caja
   const btnNueva = document.getElementById('btnNuevaCaja');
   if (btnNueva) btnNueva.style.display = userRole === 'admin' ? '' : 'none';
@@ -341,6 +345,7 @@ async function selectCaja(cajaId) {
   startRealtimeSync();
 
   document.getElementById('cajaSelectorScreen').style.display = 'none';
+  _applyRoleUI(); // restaurar Flujo e Historial según rol
   _updateCajaHeader();
   showView('auto');
 }
@@ -407,6 +412,7 @@ function _showEmployeeView() {
   const open = state.cajaAbierta;
   document.getElementById('empCajaCerrada').classList.toggle('hidden', open);
   document.getElementById('empCajaAbierta').classList.toggle('hidden', !open);
+  if (!open) _actualizarContadorCC();
 
   if (open) {
     const fechaStr = state.aperturaFecha
@@ -525,6 +531,72 @@ async function abrirCajaPOS() {
   }
 }
 
+function _ccUsadasHoy() {
+  const hoy = _todayPE();
+  return (state.aperturasCaja || []).filter(a =>
+    a.tipo === 'fisica-cerrada' &&
+    a.fecha && new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(a.fecha)) === hoy
+  ).length;
+}
+
+function _actualizarContadorCC() {
+  const el  = document.getElementById('empCerradaContador');
+  const btn = document.getElementById('btnAbrirCC');
+  if (!el) return;
+  const usadas    = _ccUsadasHoy();
+  const restantes = 3 - usadas;
+  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles hoy` : '0/3 — límite alcanzado';
+  el.style.color  = restantes > 0 ? '#6b7280' : '#dc2626';
+  if (btn) btn.disabled = restantes <= 0;
+}
+
+function abrirGavetaCajaCerrada() {
+  if (!currentCajaId) {
+    const fb = document.getElementById('empCerradaFeedback');
+    if (fb) { fb.textContent = 'No hay caja seleccionada. Pide al administrador que cree una caja.'; }
+    return;
+  }
+  const motInp = document.getElementById('posMotivoCC');
+  const fb     = document.getElementById('empCerradaFeedback');
+  const motivo = (motInp?.value || '').trim();
+  if (!motivo) {
+    if (motInp) { motInp.focus(); motInp.style.borderColor = '#dc2626'; }
+    if (fb) fb.textContent = 'Escribe el motivo antes de continuar.';
+    return;
+  }
+  if (motInp) motInp.style.borderColor = '';
+
+  const usadas = _ccUsadasHoy();
+  if (usadas >= 3) {
+    if (fb) fb.textContent = '⚠ Límite alcanzado: ya abriste la gaveta 3 veces hoy.';
+    return;
+  }
+
+  const btn = document.getElementById('btnAbrirCC');
+  if (btn) btn.disabled = true;
+
+  try {
+    const a = document.createElement('a');
+    a.href = 'cajaabierta://abrir';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch(e) {}
+
+  _registrarAperturaCaja({ motivo, tipo: 'fisica-cerrada' });
+  if (motInp) motInp.value = '';
+
+  const restantes = 2 - usadas;
+  if (fb) {
+    fb.textContent = restantes > 0
+      ? `✔ Gaveta abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} hoy`
+      : '✔ Gaveta abierta — límite del día alcanzado';
+    setTimeout(() => { if (fb) fb.textContent = ''; }, 3000);
+  }
+  _actualizarContadorCC();
+}
+
 function registrarAperturaSinAbrir() {
   const v = _validarMotivoApertura();
   if (!v) return;
@@ -552,10 +624,11 @@ function _renderAperturasCaja() {
     const d        = new Date(a.fecha);
     const fecha    = d.toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit' });
     const hora     = d.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
-    const esRegistro = a.tipo === 'registro';
-    const badge    = esRegistro
+    const badge = a.tipo === 'registro'
       ? '<span style="background:#e5e7eb;color:#374151;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">📝 Registro</span>'
-      : '<span style="background:#dcfce7;color:#166534;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔓 Gaveta</span>';
+      : a.tipo === 'fisica-cerrada'
+        ? '<span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada</span>'
+        : '<span style="background:#dcfce7;color:#166534;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔓 Gaveta</span>';
     return `<div style="display:flex;justify-content:space-between;align-items:center;
                         padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
       <span style="color:#374151;min-width:0;overflow:hidden;text-overflow:ellipsis">
@@ -1593,7 +1666,7 @@ async function generarPDF(d) {
       const dt    = new Date(a.fecha);
       const fecha = dt.toLocaleDateString('es-PE', { timeZone: TZ, day:'2-digit', month:'2-digit', year:'numeric' });
       const hora  = dt.toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit', second:'2-digit' });
-      const tag   = a.tipo === 'registro' ? '[Solo registro]' : '[Gaveta]';
+      const tag   = a.tipo === 'registro' ? '[Solo registro]' : a.tipo === 'fisica-cerrada' ? '[Caja cerrada]' : '[Gaveta]';
       doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
       doc.text(`${i+1}. ${tag} ${a.motivo}`, mg+2, y);
       doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRAY);
