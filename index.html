@@ -27,25 +27,6 @@
   </div>
 </div>
 
-<!-- ===== SELECTOR DE CAJAS ===== -->
-<div id="cajaSelectorScreen" style="display:none">
-  <div class="caja-selector-wrap">
-    <div class="brand-logo">Che plaS</div>
-    <p class="brand-tagline">Control de Caja</p>
-    <p class="login-sub">Selecciona una caja o abre una nueva</p>
-
-    <div id="cajasLista" class="cajas-lista"></div>
-
-    <button class="btn btn-primary btn-block" id="btnNuevaCaja"
-      onclick="iniciarNuevaCaja()">
-      + Abrir nueva caja
-    </button>
-    <button class="btn-logout-selector" onclick="logout()">
-      Cerrar sesión
-    </button>
-  </div>
-</div>
-
 <!-- ===== MAIN APP ===== -->
 <div id="mainApp">
 
@@ -64,6 +45,17 @@
   <div id="syncToast" class="sync-toast hidden"></div>
 
   <div class="app-content">
+
+    <!-- ========== VISTA: SELECTOR DE CAJAS ========== -->
+    <div id="viewCajaSelector" class="view hidden">
+      <div class="caja-selector-wrap">
+        <p class="login-sub" style="margin-bottom:16px">Selecciona una caja o abre una nueva</p>
+        <div id="cajasLista" class="cajas-lista"></div>
+        <button class="btn btn-primary btn-block" id="btnNuevaCaja" onclick="iniciarNuevaCaja()">
+          + Abrir nueva caja
+        </button>
+      </div>
+    </div>
 
     <!-- ========== VISTA: APERTURA ========== -->
     <div id="viewApertura" class="view hidden">
