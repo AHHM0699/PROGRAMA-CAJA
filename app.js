@@ -1176,6 +1176,10 @@ async function cerrarCaja() {
     await saveReport(report);
   }
 
+  // Asegurar que el estado final (con rcRegistros) quede guardado antes de eliminar
+  clearTimeout(_estadoPushTimer);
+  try { await cajaRef().set(_stateToDoc()); } catch (_) {}
+
   // Eliminar la caja de Firestore (el historial ya la tiene)
   try { await cajaRef().delete(); } catch (_) {
     try { await cajaRef().set({ eliminada: true, cajaAbierta: false, _ts: Date.now() }, { merge: true }); } catch (e2) { console.warn('Error eliminando caja:', e2); }
@@ -2153,9 +2157,20 @@ function tryParseJSON(str, fallback) {
 let _rcCajaTimes = [];
 const SAS_REPORTE_URL = 'https://cheplast.organizatic.com/principal#/reportes/ventas';
 
+function _rcFechaCaja() {
+  if (state.aperturaFecha) {
+    return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(state.aperturaFecha));
+  }
+  return _todayPE();
+}
+
 function _rcReporteHecho() {
-  const hoy = _todayPE();
-  return (state.rcRegistros || []).some(r => r.fecha && r.fecha.startsWith(hoy));
+  const fechaCaja = _rcFechaCaja();
+  return (state.rcRegistros || []).some(r => {
+    if (!r.fecha) return false;
+    const fechaReg = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.fecha));
+    return fechaReg === fechaCaja;
+  });
 }
 
 function _rcActualizarBadge() {
@@ -2177,9 +2192,9 @@ async function openReporteCaja() {
   document.getElementById('rcFormComprobantes').style.display = 'none';
   const picker = document.getElementById('rcFechaPicker');
   if (picker) {
-    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+    const hoy = _todayPE();
     picker.max   = hoy;
-    picker.value = hoy;
+    picker.value = _rcFechaCaja();
   }
   _rcSetMsg('Haz clic en <b>&#9658; Iniciar Reporte</b> para obtener los datos de TROEFAE.', false);
   _rcRenderAperturasEmp();
@@ -2293,7 +2308,7 @@ function rcRegistrarComprobantes() {
 
   if (!Array.isArray(state.rcRegistros)) state.rcRegistros = [];
   state.rcRegistros.push({ aperturasBat, aperturasEmp, comprobantes, fecha: new Date().toISOString() });
-  saveState();
+  saveStateNow();
   _rcRenderRegistros();
   _rcActualizarBadge();
   if (input) input.value = '';
