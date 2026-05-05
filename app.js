@@ -136,12 +136,11 @@ async function _initSession(user) {
 
 function _showLoginScreen() {
   stopRealtimeSync();
-  document.getElementById('loginScreen').style.display        = 'flex';
-  document.getElementById('mainApp').style.display            = 'none';
-  document.getElementById('cajaSelectorScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('mainApp').style.display     = 'none';
   document.getElementById('emailInput').focus();
-  state         = _defaultState();
-  currentCajaId = null;
+  state             = _defaultState();
+  currentCajaId     = null;
   currentCajaNombre = null;
 }
 
@@ -232,11 +231,11 @@ async function showCajaSelector() {
   if (_pipWindow && !_pipWindow.closed) _pipWindow.close();
   _pipWindow = null;
 
-  // Ocultar vistas del app, mostrar selector
-  document.getElementById('cajaSelectorScreen').style.display = 'flex';
+  // Mostrar selector, ocultar todas las demás vistas
   ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
+  document.getElementById('viewCajaSelector').classList.remove('hidden');
   if (_flujoUnsub) { _flujoUnsub(); _flujoUnsub = null; }
 
   // Bloquear Flujo e Historial hasta que se elija una caja
@@ -344,7 +343,7 @@ async function selectCaja(cajaId) {
   currentCajaNombre = state.nombre || '';
   startRealtimeSync();
 
-  document.getElementById('cajaSelectorScreen').style.display = 'none';
+  document.getElementById('viewCajaSelector').classList.add('hidden');
   _applyRoleUI(); // restaurar Flujo e Historial según rol
   _updateCajaHeader();
   showView('auto');
@@ -355,7 +354,7 @@ function iniciarNuevaCaja() {
   currentCajaNombre = null;
   state             = _defaultState();
 
-  document.getElementById('cajaSelectorScreen').style.display = 'none';
+  document.getElementById('viewCajaSelector').classList.add('hidden');
   // Limpiar campos de apertura
   ['cajaInicialExacto','ventasHastaAhora','ultimoYape','cajaNombreInput'].forEach(id => {
     const el = document.getElementById(id);
@@ -392,7 +391,7 @@ function showView(view) {
   if (userRole === 'employee') { _showEmployeeView(); return; }
   if (view === 'auto') view = state.cajaAbierta ? 'cierre' : 'apertura';
 
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo','viewCajaSelector'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   const cap = view.charAt(0).toUpperCase() + view.slice(1);
@@ -404,7 +403,7 @@ function showView(view) {
 }
 
 function _showEmployeeView() {
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado'].forEach(id =>
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewCajaSelector'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   document.getElementById('viewEmpleado').classList.remove('hidden');
@@ -1843,7 +1842,7 @@ function _getMesLabel(mes) {
 }
 
 function showFlujoView() {
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado'].forEach(id =>
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewCajaSelector'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   document.getElementById('viewFlujo').classList.remove('hidden');

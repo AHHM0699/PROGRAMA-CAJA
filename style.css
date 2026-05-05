@@ -1228,15 +1228,14 @@ kbd {
 .hidden { display: none !important; }
 
 /* ============ CAJA SELECTOR ============ */
-#cajaSelectorScreen {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
+#viewCajaSelector {
   display: flex;
   align-items: center;
   justify-content: center;
   background: linear-gradient(145deg, #0f3d22 0%, #1a6b3c 50%, #16a34a 100%);
+  min-height: 100%;
   overflow-y: auto;
+  padding: 32px 16px;
 }
 
 .caja-selector-wrap {
@@ -1351,7 +1350,7 @@ kbd {
   .btn-lg { padding: 12px 24px; font-size: 14px; }
 
   /* Login / selector: full-screen on mobile — no floating card */
-  #loginScreen, #cajaSelectorScreen {
+  #loginScreen, #viewCajaSelector {
     align-items: flex-start;
     padding: 0;
   }
