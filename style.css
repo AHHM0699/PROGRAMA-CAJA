@@ -1227,6 +1227,43 @@ kbd {
 /* ============ HELPERS ============ */
 .hidden { display: none !important; }
 
+/* ============ HOME / MENÚ PRINCIPAL ============ */
+.home-hero { text-align: center; padding: 40px 0 28px; }
+.home-title { font-size: 24px; font-weight: 700; color: var(--green-900); margin-bottom: 6px; }
+.home-sub { font-size: 14px; color: var(--gray-500); }
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  max-width: 740px;
+  margin: 0 auto;
+}
+.home-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: #fff;
+  border: 2px solid var(--gray-200);
+  border-radius: var(--radius-xl);
+  padding: 36px 20px 32px;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, transform .12s;
+  text-align: center;
+  color: var(--gray-900);
+  font-family: inherit;
+}
+.home-card:hover {
+  border-color: var(--green-600);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-3px);
+}
+.home-card:active { transform: translateY(-1px); }
+.home-card-icon { font-size: 44px; line-height: 1; }
+.home-card-title { font-size: 18px; font-weight: 700; color: var(--green-800); }
+.home-card-sub { font-size: 13px; color: var(--gray-500); line-height: 1.4; }
+
 /* ============ CAJA SELECTOR ============ */
 #viewCajaSelector {
   display: flex;
@@ -1361,6 +1398,10 @@ kbd {
     max-width: 100%;
     box-shadow: none;
   }
+
+  .home-grid { grid-template-columns: 1fr; max-width: 100%; }
+  .home-card { padding: 24px 16px; flex-direction: row; text-align: left; gap: 16px; }
+  .home-card-icon { font-size: 32px; flex-shrink: 0; }
 
   /* Header overflow: compact + wrap so all buttons stay accessible */
   .header-right { gap: 3px; flex-wrap: wrap; justify-content: flex-end; }

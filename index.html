@@ -46,6 +46,31 @@
 
   <div class="app-content">
 
+    <!-- ========== VISTA: HOME / MENÚ PRINCIPAL ========== -->
+    <div id="viewHome" class="view hidden">
+      <div class="home-hero">
+        <h2 class="home-title">¿A dónde quieres ir?</h2>
+        <p class="home-sub">Selecciona una sección para continuar</p>
+      </div>
+      <div class="home-grid">
+        <button class="home-card" onclick="showCajaSelector()">
+          <span class="home-card-icon">🏧</span>
+          <span class="home-card-title">Cajas</span>
+          <span class="home-card-sub">Abrir, cerrar o seleccionar una caja</span>
+        </button>
+        <button class="home-card" onclick="showFlujoView()">
+          <span class="home-card-icon">📊</span>
+          <span class="home-card-title">Flujo</span>
+          <span class="home-card-sub">Ver el flujo de efectivo mensual</span>
+        </button>
+        <button class="home-card" onclick="showView('reportes')">
+          <span class="home-card-icon">📋</span>
+          <span class="home-card-title">Historial</span>
+          <span class="home-card-sub">Reportes y comprobantes anteriores</span>
+        </button>
+      </div>
+    </div>
+
     <!-- ========== VISTA: SELECTOR DE CAJAS ========== -->
     <div id="viewCajaSelector" class="view hidden">
       <div class="caja-selector-wrap">

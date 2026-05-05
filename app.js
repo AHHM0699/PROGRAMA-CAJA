@@ -131,7 +131,11 @@ async function _initSession(user) {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('mainApp').style.display     = 'block';
   _applyRoleUI();
-  await showCajaSelector();
+  if (userRole === 'employee') {
+    await showCajaSelector();
+  } else {
+    showHomeView();
+  }
 }
 
 function _showLoginScreen() {
@@ -226,21 +230,28 @@ async function logout() {
 // ============================================================
 //  CAJA SELECTOR
 // ============================================================
+function showHomeView() {
+  stopRealtimeSync();
+  if (_pipWindow && !_pipWindow.closed) _pipWindow.close();
+  _pipWindow = null;
+  if (_flujoUnsub) { _flujoUnsub(); _flujoUnsub = null; }
+  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo','viewCajaSelector'].forEach(id =>
+    document.getElementById(id).classList.add('hidden')
+  );
+  document.getElementById('viewHome').classList.remove('hidden');
+}
+
 async function showCajaSelector() {
   stopRealtimeSync();
   if (_pipWindow && !_pipWindow.closed) _pipWindow.close();
   _pipWindow = null;
 
   // Mostrar selector, ocultar todas las demás vistas
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
+  ['viewHome','viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   document.getElementById('viewCajaSelector').classList.remove('hidden');
   if (_flujoUnsub) { _flujoUnsub(); _flujoUnsub = null; }
-
-  // Bloquear Flujo e Historial hasta que se elija una caja
-  document.getElementById('btnFlujo').classList.add('hidden');
-  document.getElementById('btnHistorial').classList.add('hidden');
 
   // Solo admin puede abrir nueva caja
   const btnNueva = document.getElementById('btnNuevaCaja');
@@ -391,7 +402,7 @@ function showView(view) {
   if (userRole === 'employee') { _showEmployeeView(); return; }
   if (view === 'auto') view = state.cajaAbierta ? 'cierre' : 'apertura';
 
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo','viewCajaSelector'].forEach(id =>
+  ['viewHome','viewApertura','viewCierre','viewReportes','viewEmpleado','viewFlujo','viewCajaSelector'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   const cap = view.charAt(0).toUpperCase() + view.slice(1);
@@ -403,7 +414,7 @@ function showView(view) {
 }
 
 function _showEmployeeView() {
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewCajaSelector'].forEach(id =>
+  ['viewHome','viewApertura','viewCierre','viewReportes','viewEmpleado','viewCajaSelector'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   document.getElementById('viewEmpleado').classList.remove('hidden');
@@ -1842,7 +1853,7 @@ function _getMesLabel(mes) {
 }
 
 function showFlujoView() {
-  ['viewApertura','viewCierre','viewReportes','viewEmpleado','viewCajaSelector'].forEach(id =>
+  ['viewHome','viewApertura','viewCierre','viewReportes','viewEmpleado','viewCajaSelector'].forEach(id =>
     document.getElementById(id).classList.add('hidden')
   );
   document.getElementById('viewFlujo').classList.remove('hidden');
