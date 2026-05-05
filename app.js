@@ -2238,6 +2238,10 @@ async function iniciarReporteCaja() {
 
   _rcSetMsg('Enviando solicitud a TROEFAE…', true);
 
+  // Marcar el momento exacto del envío — solo aceptaremos docs con
+  // updatedAt posterior a este instante (descarta cache Firestore viejo)
+  const enviadoEn = new Date();
+
   // Escribir solicitud en Firestore para que TROEFAE la procese
   try {
     await db.doc('requests/reporte-caja').set({
@@ -2261,12 +2265,19 @@ async function iniciarReporteCaja() {
   }, 30000); // 30 segundos de espera máxima
 
   _rcUnsubscribe = db.doc(`reporteCaja/${fecha}`).onSnapshot(snap => {
-    if (!snap.exists) return; // aún no llegó el resultado
+    if (!snap.exists) return;
+
+    const data = snap.data();
+
+    // Ignorar documentos viejos (caché de consultas anteriores del día)
+    const updatedAt = data.updatedAt
+      ? (typeof data.updatedAt.toDate === 'function' ? data.updatedAt.toDate() : new Date(data.updatedAt))
+      : null;
+    if (!updatedAt || updatedAt <= enviadoEn) return;
 
     clearTimeout(timeout);
     if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
 
-    const data      = snap.data();
     const cajaTimes = Array.isArray(data.times) ? data.times : [];
 
     _rcCajaTimes = cajaTimes;
