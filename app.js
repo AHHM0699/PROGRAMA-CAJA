@@ -348,6 +348,7 @@ async function eliminarCajaDeListado(cajaId) {
 
 async function selectCaja(cajaId) {
   currentCajaId = cajaId;
+  cierreMode = 'monto';
 
   state = _defaultState();
   await _loadStateFromFirestore();
