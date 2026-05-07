@@ -326,9 +326,12 @@ function _cancelEliminar() {
 }
 
 async function eliminarCajaDeListado(cajaId) {
-  // Obtener nombre de la caja para mostrarlo en el modal
-  let cajaNombre = '';
-  try { const s = await db.doc(`cajas/${cajaId}`).get(); cajaNombre = s.exists ? (s.data().nombre || '') : ''; } catch (_) {}
+  // Leer nombre y borrador ID antes de eliminar el documento
+  let cajaNombre = '', historialBorradorId = null;
+  try {
+    const s = await db.doc(`cajas/${cajaId}`).get();
+    if (s.exists) { cajaNombre = s.data().nombre || ''; historialBorradorId = s.data().historialBorradorId || null; }
+  } catch (_) {}
   if (!await _confirmarEliminar(cajaNombre)) return;
   const ref = db.doc(`cajas/${cajaId}`);
   let ok = false;
@@ -337,12 +340,9 @@ async function eliminarCajaDeListado(cajaId) {
     try { await ref.set({ eliminada: true, cajaAbierta: false, _ts: Date.now() }, { merge: true }); ok = true; } catch (e) { console.error(e); }
   }
   if (!ok) { alert('No se pudo eliminar la caja. Verifica tu conexión.'); return; }
-  // También borrar el borrador de historial si existe
-  try {
-    const snap = await ref.get();
-    const bid = snap.exists && snap.data().historialBorradorId;
-    if (bid) await db.collection('historial').doc(bid).delete().catch(() => {});
-  } catch (_) {}
+  if (historialBorradorId) {
+    db.collection('historial').doc(historialBorradorId).delete().catch(() => {});
+  }
   await _renderCajasLista();
 }
 
@@ -847,6 +847,7 @@ function _buildBorradorDoc() {
     totalYapes:      _calcTotalYapesFromRaw(state.yapesRaw),
     eventos:         state.eventos         || [],
     aperturasCaja:   state.aperturasCaja   || [],
+    rcRegistros:     state.rcRegistros     || [],
   };
 }
 
@@ -907,6 +908,10 @@ function startRealtimeSync() {
     if (!snap.exists) {
       // Caja eliminada (cerrada por otro dispositivo) → volver al selector
       showSyncToast('📋 Caja cerrada en otro dispositivo');
+      stopRealtimeSync();
+      currentCajaId     = null;
+      currentCajaNombre = null;
+      state             = _defaultState();
       setTimeout(() => showCajaSelector(), 2000);
       return;
     }
@@ -1258,18 +1263,26 @@ async function cerrarCaja() {
   const bRef = _borradorRef();
   if (bRef) {
     try { await bRef.set({ ...report, estado: 'cerrado' }); }
-    catch (e) { console.error('Error actualizando borrador al cierre:', e); await saveReport(report); }
+    catch (e) {
+      console.error('Error actualizando borrador al cierre:', e);
+      // Guardar copia nueva con estado correcto y eliminar el borrador huérfano
+      await saveReport({ ...report, estado: 'cerrado' });
+      try { await bRef.delete(); } catch (_) {}
+    }
   } else {
-    await saveReport(report);
+    await saveReport({ ...report, estado: 'cerrado' });
   }
 
-  // Asegurar que el estado final (con rcRegistros) quede guardado antes de eliminar
+  // Capturar la ref antes de nularla para que saveStateNow() no pueda recrear la caja
+  const _refFinal = cajaRef();
+  currentCajaId = null;
+
   clearTimeout(_estadoPushTimer);
-  try { await cajaRef().set(_stateToDoc()); } catch (_) {}
+  try { await _refFinal.set(_stateToDoc()); } catch (_) {}
 
   // Eliminar la caja de Firestore (el historial ya la tiene)
-  try { await cajaRef().delete(); } catch (_) {
-    try { await cajaRef().set({ eliminada: true, cajaAbierta: false, _ts: Date.now() }, { merge: true }); } catch (e2) { console.warn('Error eliminando caja:', e2); }
+  try { await _refFinal.delete(); } catch (_) {
+    try { await _refFinal.set({ eliminada: true, cajaAbierta: false, _ts: Date.now() }, { merge: true }); } catch (e2) { console.warn('Error eliminando caja:', e2); }
   }
 
   await generarPDF(report);
