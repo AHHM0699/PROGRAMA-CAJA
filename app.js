@@ -2352,23 +2352,78 @@ function _rcSetMsg(html, spinner) {
 
 let _rcUnsubscribe = null;
 
+function _rcParsarUpdatedAt(data) {
+  if (!data.updatedAt) return null;
+  return typeof data.updatedAt.toDate === 'function'
+    ? data.updatedAt.toDate()
+    : new Date(data.updatedAt);
+}
+
+function _rcFechaDeUpdatedAt(updatedAt) {
+  if (!updatedAt) return null;
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(updatedAt);
+}
+
+function _rcMostrarDatos(data, fecha, btn) {
+  const cajaTimes   = Array.isArray(data.times) ? data.times : [];
+  _rcCajaTimes      = cajaTimes;
+  const aperturasBat = cajaTimes.length;
+  const aperturasEmp = (state.aperturasCaja || []).length;
+
+  if (aperturasBat === 0) {
+    _rcSetMsg(`Sin aperturas registradas en TROEFAE para el ${fecha}.`, false);
+    document.getElementById('rcFormComprobantes').style.display = 'none';
+    btn.disabled = false;
+    return;
+  }
+
+  const updatedAt  = _rcParsarUpdatedAt(data);
+  const horaStr    = updatedAt
+    ? updatedAt.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
+    : '';
+  _rcSetMsg(
+    `✔ ${aperturasBat} apertura(s) de TROEFAE${horaStr ? ' (' + horaStr + ')' : ''}. Ingresa los comprobantes abajo.`,
+    false
+  );
+  const info = document.getElementById('rcAperturasInfo');
+  if (info) {
+    info.innerHTML =
+      `Total aperturas (TROEFAE): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
+      `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
+  }
+  document.getElementById('rcFormComprobantes').style.display = '';
+  const input = document.getElementById('rcInputComprobantes');
+  if (input) { input.value = ''; input.focus(); }
+  btn.disabled = false;
+}
+
 async function iniciarReporteCaja() {
   const btn = document.getElementById('btnIniciarReporte');
   btn.disabled = true;
-
-  // Cancelar listener anterior si existe
   if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
 
   const picker = document.getElementById('rcFechaPicker');
   const fecha  = picker?.value || _todayPE();
 
-  _rcSetMsg('Enviando solicitud a TROEFAE…', true);
+  _rcSetMsg('Verificando datos de TROEFAE…', true);
 
-  // Marcar el momento exacto del envío — solo aceptaremos docs con
-  // updatedAt posterior a este instante (descarta cache Firestore viejo)
+  // Si el .bat ya corrió hoy, mostrar los datos existentes sin enviar solicitud
+  try {
+    const snap = await db.doc(`reporteCaja/${fecha}`).get();
+    if (snap.exists) {
+      const data      = snap.data();
+      const updatedAt = _rcParsarUpdatedAt(data);
+      if (_rcFechaDeUpdatedAt(updatedAt) === fecha) {
+        _rcMostrarDatos(data, fecha, btn);
+        return;
+      }
+    }
+  } catch(e) { /* sin datos locales, continuar con solicitud en vivo */ }
+
+  // Sin datos de hoy: enviar solicitud al watcher de TROEFAE
+  _rcSetMsg('Enviando solicitud a TROEFAE…', true);
   const enviadoEn = new Date();
 
-  // Escribir solicitud en Firestore para que TROEFAE la procese
   try {
     await db.doc('requests/reporte-caja').set({
       fecha,
@@ -2383,54 +2438,24 @@ async function iniciarReporteCaja() {
 
   _rcSetMsg('Esperando respuesta de TROEFAE…', true);
 
-  // Escuchar resultado en tiempo real (onSnapshot)
   const timeout = setTimeout(() => {
     if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
     _rcSetMsg('TROEFAE no respondió. Verifica que esté encendida y con el watcher activo.', false);
     btn.disabled = false;
-  }, 30000); // 30 segundos de espera máxima
+  }, 30000);
 
   _rcUnsubscribe = db.doc(`reporteCaja/${fecha}`).onSnapshot(snap => {
     if (!snap.exists) return;
-
-    const data = snap.data();
-
-    // Ignorar documentos viejos (caché de consultas anteriores del día)
-    const updatedAt = data.updatedAt
-      ? (typeof data.updatedAt.toDate === 'function' ? data.updatedAt.toDate() : new Date(data.updatedAt))
-      : null;
-    // Allow 10s tolerance: handles second-precision truncation and minor clock skew between TROEFAE and client
-    if (!updatedAt || updatedAt.getTime() < enviadoEn.getTime() - 10000) return;
+    const data      = snap.data();
+    const updatedAt = _rcParsarUpdatedAt(data);
+    // Aceptar solo respuestas de hoy, con tolerancia de 10s para diferencia de relojes
+    const isFromToday    = _rcFechaDeUpdatedAt(updatedAt) === fecha;
+    const isAfterRequest = updatedAt && updatedAt.getTime() >= enviadoEn.getTime() - 10000;
+    if (!updatedAt || (!isFromToday && !isAfterRequest)) return;
 
     clearTimeout(timeout);
     if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
-
-    const cajaTimes = Array.isArray(data.times) ? data.times : [];
-
-    _rcCajaTimes = cajaTimes;
-    const aperturasBat = cajaTimes.length;
-    const aperturasEmp = (state.aperturasCaja || []).length;
-
-    if (aperturasBat === 0) {
-      _rcSetMsg(`Sin aperturas registradas en TROEFAE para el ${fecha}.`, false);
-      document.getElementById('rcFormComprobantes').style.display = 'none';
-      btn.disabled = false;
-      return;
-    }
-
-    _rcSetMsg(`✔ ${aperturasBat} apertura(s) obtenidas de TROEFAE. El SAS se abrió — ingresa los comprobantes abajo.`, false);
-
-    const info = document.getElementById('rcAperturasInfo');
-    if (info) {
-      info.innerHTML =
-        `Total aperturas (TROEFAE): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
-        `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
-    }
-    document.getElementById('rcFormComprobantes').style.display = '';
-    const input = document.getElementById('rcInputComprobantes');
-    if (input) { input.value = ''; input.focus(); }
-
-    btn.disabled = false;
+    _rcMostrarDatos(data, fecha, btn);
   });
 }
 
