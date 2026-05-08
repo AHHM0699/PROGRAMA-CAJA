@@ -2300,12 +2300,13 @@ async function openReporteCaja() {
 }
 
 function toggleListaAperturas() {
-  const lista = document.getElementById('rcAperturasEmpList');
-  const btn   = document.getElementById('btnToggleAperturasRc');
+  const lista  = document.getElementById('rcAperturasEmpList');
+  const btn    = document.getElementById('btnToggleAperturasRc');
   if (!lista) return;
   const visible = lista.style.display !== 'none';
   lista.style.display = visible ? 'none' : '';
-  if (btn) btn.textContent = visible ? '▼ Ver lista' : '▲ Ocultar';
+  const n = (state.aperturasCaja || []).length;
+  if (btn) btn.textContent = visible ? `▼ Ver lista (${n})` : `▲ Ocultar (${n})`;
 }
 
 async function refreshAperturasEmp() {
@@ -2323,11 +2324,14 @@ async function refreshAperturasEmp() {
 }
 
 function _rcRenderAperturasEmp() {
-  const el = document.getElementById('rcAperturasEmpList');
+  const el  = document.getElementById('rcAperturasEmpList');
+  const btn = document.getElementById('btnToggleAperturasRc');
   if (!el) return;
   const lista = (state.aperturasCaja || []);
   if (lista.length === 0) {
-    el.innerHTML = '<span style="color:#9ca3af">Sin aperturas registradas hoy.</span>';
+    el.innerHTML = '<span style="color:#9ca3af">Sin aperturas registradas.</span>';
+    el.style.display = 'none';
+    if (btn) btn.textContent = '▼ Ver lista (0)';
     return;
   }
   el.innerHTML = lista.map((a, i) => {
@@ -2337,6 +2341,8 @@ function _rcRenderAperturasEmp() {
       <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
     </div>`;
   }).join('') + `<div style="padding-top:6px;font-weight:600;color:#1a6b3c">Total: ${lista.length}</div>`;
+  el.style.display = '';
+  if (btn) btn.textContent = `▲ Ocultar (${lista.length})`;
 }
 
 function _rcSetMsg(html, spinner) {
@@ -2393,7 +2399,8 @@ async function iniciarReporteCaja() {
     const updatedAt = data.updatedAt
       ? (typeof data.updatedAt.toDate === 'function' ? data.updatedAt.toDate() : new Date(data.updatedAt))
       : null;
-    if (!updatedAt || updatedAt <= enviadoEn) return;
+    // Allow 10s tolerance: handles second-precision truncation and minor clock skew between TROEFAE and client
+    if (!updatedAt || updatedAt.getTime() < enviadoEn.getTime() - 10000) return;
 
     clearTimeout(timeout);
     if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
