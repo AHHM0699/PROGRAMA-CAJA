@@ -544,10 +544,12 @@ async function abrirCajaPOS() {
 
 function _ccUsadasHoy() {
   const hoy = _todayPE();
-  return (state.aperturasCaja || []).filter(a =>
+  const fromState = (state.aperturasCaja || []).filter(a =>
     a.tipo === 'fisica-cerrada' &&
     a.fecha && new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(a.fecha)) === hoy
   ).length;
+  const fromLocal = parseInt(localStorage.getItem(`ccAperturas_${hoy}`) || '0');
+  return fromState + fromLocal;
 }
 
 function _actualizarContadorCC() {
@@ -562,11 +564,6 @@ function _actualizarContadorCC() {
 }
 
 function abrirGavetaCajaCerrada() {
-  if (!currentCajaId) {
-    const fb = document.getElementById('empCerradaFeedback');
-    if (fb) { fb.textContent = 'No hay caja seleccionada. Pide al administrador que cree una caja.'; }
-    return;
-  }
   const motInp = document.getElementById('posMotivoCC');
   const fb     = document.getElementById('empCerradaFeedback');
   const motivo = (motInp?.value || '').trim();
@@ -595,7 +592,12 @@ function abrirGavetaCajaCerrada() {
     document.body.removeChild(a);
   } catch(e) {}
 
-  _registrarAperturaCaja({ motivo, tipo: 'fisica-cerrada' });
+  if (currentCajaId) {
+    _registrarAperturaCaja({ motivo, tipo: 'fisica-cerrada' });
+  } else {
+    const hoy = _todayPE();
+    localStorage.setItem(`ccAperturas_${hoy}`, String(usadas + 1));
+  }
   if (motInp) motInp.value = '';
 
   const restantes = 2 - usadas;
