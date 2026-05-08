@@ -2265,12 +2265,7 @@ function _rcFechaCaja() {
 }
 
 function _rcReporteHecho() {
-  const fechaCaja = _rcFechaCaja();
-  return (state.rcRegistros || []).some(r => {
-    if (!r.fecha) return false;
-    const fechaReg = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.fecha));
-    return fechaReg === fechaCaja;
-  });
+  return (state.rcRegistros || []).length > 0;
 }
 
 function _rcActualizarBadge() {
