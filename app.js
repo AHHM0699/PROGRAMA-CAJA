@@ -264,6 +264,14 @@ async function _renderCajasLista() {
   const lista = document.getElementById('cajasLista');
   lista.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:12px">Cargando...</p>';
 
+  const ccCard = document.getElementById('selectorAperturaCC');
+  const showCcCard = (hayAlgunaAbierta) => {
+    if (!ccCard) return;
+    const visible = userRole === 'employee' && !hayAlgunaAbierta;
+    ccCard.classList.toggle('hidden', !visible);
+    if (visible) _actualizarContadorSelectorCC();
+  };
+
   try {
     const snap  = await db.collection('cajas').get();
     const cajas = snap.docs
@@ -279,6 +287,7 @@ async function _renderCajasLista() {
       if (userRole === 'employee') {
         lista.innerHTML = '<p class="no-cajas-msg">⏳ Esperando apertura de caja…</p>';
       }
+      showCcCard(false);
       return;
     }
 
@@ -287,6 +296,8 @@ async function _renderCajasLista() {
       await selectCaja(cajas[0].id);
       return;
     }
+
+    showCcCard(cajas.some(c => c.cajaAbierta));
 
     const isAdmin = userRole === 'admin';
     lista.innerHTML = cajas.map(c => `
@@ -306,6 +317,7 @@ async function _renderCajasLista() {
   } catch (e) {
     lista.innerHTML = '<p style="color:#dc2626;text-align:center">Error cargando cajas</p>';
     console.error(e);
+    showCcCard(false);
   }
 }
 
@@ -552,6 +564,19 @@ function _ccUsadasHoy() {
   return fromState + fromLocal;
 }
 
+function _ccLogHoy() {
+  const hoy = _todayPE();
+  try { return JSON.parse(localStorage.getItem(`ccAperturasLog_${hoy}`) || '[]'); }
+  catch (_) { return []; }
+}
+
+function _ccLogPush(entry) {
+  const hoy = _todayPE();
+  const list = _ccLogHoy();
+  list.push(entry);
+  localStorage.setItem(`ccAperturasLog_${hoy}`, JSON.stringify(list));
+}
+
 function _actualizarContadorCC() {
   const el  = document.getElementById('empCerradaContador');
   const btn = document.getElementById('btnAbrirCC');
@@ -596,6 +621,7 @@ function abrirGavetaCajaCerrada() {
     _registrarAperturaCaja({ motivo, tipo: 'fisica-cerrada' });
   } else {
     const hoy = _todayPE();
+    _ccLogPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString() });
     localStorage.setItem(`ccAperturas_${hoy}`, String(usadas + 1));
   }
   if (motInp) motInp.value = '';
@@ -608,6 +634,84 @@ function abrirGavetaCajaCerrada() {
     setTimeout(() => { if (fb) fb.textContent = ''; }, 3000);
   }
   _actualizarContadorCC();
+}
+
+// ── Apertura física desde el selector cuando no hay cajas abiertas ──
+function _renderSelectorCCList() {
+  const el = document.getElementById('selectorCCList');
+  if (!el) return;
+  const list = _ccLogHoy();
+  if (list.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    '<div style="font-size:12px;color:#6b7280;margin-bottom:4px">Aperturas de hoy</div>' +
+    list.map((a, i) => {
+      const d = new Date(a.fecha);
+      const hora = d.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+      return `<div style="display:flex;justify-content:space-between;align-items:center;
+                          padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
+        <span style="color:#374151;min-width:0;overflow:hidden;text-overflow:ellipsis">
+          ${i+1}. <span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada</span>${escHtml(a.motivo)}
+        </span>
+        <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
+      </div>`;
+    }).join('');
+}
+
+function _actualizarContadorSelectorCC() {
+  const el  = document.getElementById('selectorCCContador');
+  const btn = document.getElementById('btnAbrirSelectorCC');
+  if (!el) return;
+  const usadas    = _ccUsadasHoy();
+  const restantes = 3 - usadas;
+  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles hoy` : '0/3 — límite alcanzado';
+  el.style.color  = restantes > 0 ? '#6b7280' : '#dc2626';
+  if (btn) btn.disabled = restantes <= 0;
+  _renderSelectorCCList();
+}
+
+function abrirCajaSinCajaActiva() {
+  const motInp = document.getElementById('selectorMotivoCC');
+  const fb     = document.getElementById('selectorCCFeedback');
+  const motivo = (motInp?.value || '').trim();
+  if (!motivo) {
+    if (motInp) { motInp.focus(); motInp.style.borderColor = '#dc2626'; }
+    if (fb) fb.textContent = 'Escribe el motivo antes de continuar.';
+    return;
+  }
+  if (motInp) motInp.style.borderColor = '';
+
+  const usadas = _ccUsadasHoy();
+  if (usadas >= 3) {
+    if (fb) fb.textContent = '⚠ Límite alcanzado: ya abriste la caja 3 veces hoy.';
+    _actualizarContadorSelectorCC();
+    return;
+  }
+
+  const btn = document.getElementById('btnAbrirSelectorCC');
+  if (btn) btn.disabled = true;
+
+  try {
+    const a = document.createElement('a');
+    a.href = 'cajaabierta://abrir';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (_) {}
+
+  const hoy = _todayPE();
+  _ccLogPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString() });
+  localStorage.setItem(`ccAperturas_${hoy}`, String(usadas + 1));
+
+  if (motInp) motInp.value = '';
+  const restantes = 2 - usadas;
+  if (fb) {
+    fb.textContent = restantes > 0
+      ? `✔ Caja abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} hoy`
+      : '✔ Caja abierta — límite del día alcanzado';
+    setTimeout(() => { if (fb) fb.textContent = ''; }, 3000);
+  }
+  _actualizarContadorSelectorCC();
 }
 
 function registrarAperturaSinAbrir() {

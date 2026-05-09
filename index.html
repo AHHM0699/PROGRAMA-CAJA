@@ -79,6 +79,32 @@
         <button class="btn btn-primary btn-block" id="btnNuevaCaja" onclick="iniciarNuevaCaja()">
           + Abrir nueva caja
         </button>
+
+        <!-- Apertura física para empleado cuando no hay cajas abiertas -->
+        <div id="selectorAperturaCC" class="hidden" style="margin-top:18px;text-align:left">
+          <div class="card">
+            <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+              <h3>🔓 Apertura de caja</h3>
+              <span id="selectorCCContador" style="font-size:12px;color:#6b7280;font-weight:400"></span>
+            </div>
+            <div class="card-body">
+              <p style="font-size:13px;color:#6b7280;margin-bottom:12px">
+                Puedes abrir físicamente la caja aunque no haya ninguna caja activa.<br>
+                Máximo <strong>3 veces por día</strong>.
+              </p>
+              <div class="input-group" style="margin-bottom:6px">
+                <input id="selectorMotivoCC" type="text" class="form-control"
+                  placeholder="Motivo de apertura…"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();abrirCajaSinCajaActiva()}">
+                <button id="btnAbrirSelectorCC" class="btn-pos" onclick="abrirCajaSinCajaActiva()">
+                  🔓 Abrir
+                </button>
+              </div>
+              <span id="selectorCCFeedback" class="feedback-text"></span>
+              <div id="selectorCCList" style="margin-top:10px"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
