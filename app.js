@@ -2509,23 +2509,9 @@ async function iniciarReporteCaja() {
   const picker = document.getElementById('rcFechaPicker');
   const fecha  = picker?.value || _todayPE();
 
-  _rcSetMsg('Verificando datos de TROEFAE…', true);
-
-  // Si el .bat ya corrió hoy, mostrar los datos existentes sin enviar solicitud
-  try {
-    const snap = await db.doc(`reporteCaja/${fecha}`).get();
-    if (snap.exists) {
-      const data      = snap.data();
-      const updatedAt = _rcParsarUpdatedAt(data);
-      if (_rcFechaDeUpdatedAt(updatedAt) === fecha) {
-        _rcMostrarDatos(data, fecha, btn);
-        return;
-      }
-    }
-  } catch(e) { /* sin datos locales, continuar con solicitud en vivo */ }
-
-  // Sin datos de hoy: enviar solicitud al watcher de TROEFAE
   _rcSetMsg('Enviando solicitud a TROEFAE…', true);
+
+  // Registrar momento exacto antes de enviar — solo aceptar respuestas posteriores
   const enviadoEn = new Date();
 
   try {
@@ -2552,10 +2538,8 @@ async function iniciarReporteCaja() {
     if (!snap.exists) return;
     const data      = snap.data();
     const updatedAt = _rcParsarUpdatedAt(data);
-    // Aceptar solo respuestas de hoy, con tolerancia de 10s para diferencia de relojes
-    const isFromToday    = _rcFechaDeUpdatedAt(updatedAt) === fecha;
-    const isAfterRequest = updatedAt && updatedAt.getTime() >= enviadoEn.getTime() - 10000;
-    if (!updatedAt || (!isFromToday && !isAfterRequest)) return;
+    // Solo aceptar respuestas que llegaron después de enviar la solicitud (tolerancia 10s por diferencia de relojes)
+    if (!updatedAt || updatedAt.getTime() < enviadoEn.getTime() - 10000) return;
 
     clearTimeout(timeout);
     if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
