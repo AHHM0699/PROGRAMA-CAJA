@@ -977,6 +977,7 @@ function saveState() {
   state._ts = Date.now();
   clearTimeout(_estadoPushTimer);
   _estadoPushTimer = setTimeout(() => {
+    if (!currentCajaId) return;  // guard: caja puede haberse cerrado durante el delay
     cajaRef().set(_stateToDoc()).catch(e => console.warn('saveState error:', e));
     _syncBorrador();
   }, 1200);
@@ -1338,6 +1339,8 @@ async function generarArqueo() {
 
 async function cerrarCaja() {
   closeCierreConfirm();
+  // Cancelar cualquier saveState() pendiente para que _syncBorrador() no sobreescriba el cierre
+  clearTimeout(_estadoPushTimer);
   const ventasFinal      = parseFloat(document.getElementById('ventasFinal').value) || 0;
   const totalYapes       = getTotalYapes();
   const yapesList        = getYapesList();
