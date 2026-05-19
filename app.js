@@ -957,10 +957,14 @@ function _buildBorradorDoc() {
   };
 }
 
-function _syncBorrador() {
+async function _syncBorrador() {
   const ref = _borradorRef();
   if (!ref) return;
-  ref.set(_buildBorradorDoc()).catch(e => console.warn('Error sincronizando borrador:', e));
+  try {
+    const snap = await ref.get();
+    if (snap.exists && snap.data().estado === 'cerrado') return;
+    await ref.set(_buildBorradorDoc());
+  } catch (e) { console.warn('Error sincronizando borrador:', e); }
 }
 // ---- fin borrador helpers ----
 
@@ -1825,7 +1829,7 @@ async function generarPDF(d) {
       const label    = diff === 0 ? '✔ Cuadra' : diff > 0 ? `⚠ Faltan ${diff}` : `⚠ Sobran ${Math.abs(diff)}`;
       y = newPageIfNeeded(y, 14);
       doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...color);
-      doc.text(`${i+1}. ${label}`, mg+2, y);
+      doc.text(`${i+1}. ${label}${r.manual ? ' (manual)' : ''}`, mg+2, y);
       doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...GRAY);
       doc.text(hora, pw-mg-2, y, { align:'right' });
       y += 5;
@@ -2581,6 +2585,51 @@ function rcDeleteRegistro(i) {
   state.rcRegistros.splice(i, 1);
   saveState();
   _rcRenderRegistros();
+  _rcActualizarBadge();
+}
+
+function toggleRcManual() {
+  const panel = document.getElementById('rcManualPanel');
+  if (!panel) return;
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : '';
+  if (!visible) setTimeout(() => document.getElementById('rcManualBat')?.focus(), 50);
+}
+
+function rcRegistrarManual() {
+  const batEl  = document.getElementById('rcManualBat');
+  const compEl = document.getElementById('rcManualComp');
+  const bat    = parseInt(batEl?.value,  10);
+  const comp   = parseInt(compEl?.value, 10);
+  if (isNaN(bat)  || bat  < 0) { batEl?.focus();  return; }
+  if (isNaN(comp) || comp < 0) { compEl?.focus(); return; }
+
+  const aperturasEmp = (state.aperturasCaja || []).length;
+  const esperado     = comp + aperturasEmp;
+  const diff         = bat - esperado;
+
+  if (!Array.isArray(state.rcRegistros)) state.rcRegistros = [];
+  state.rcRegistros.push({
+    aperturasBat: bat,
+    aperturasEmp,
+    comprobantes: comp,
+    fecha: new Date().toISOString(),
+    manual: true,
+  });
+  saveStateNow();
+  _rcRenderRegistros();
+  _rcActualizarBadge();
+  if (batEl)  batEl.value  = '';
+  if (compEl) compEl.value = '';
+  document.getElementById('rcManualPanel').style.display = 'none';
+
+  if (diff === 0) {
+    _rcSetMsg(`✔ Manual registrado: ${bat} bat = ${comp} comprobantes + ${aperturasEmp} empleado. Cuadra.`, false);
+  } else if (diff > 0) {
+    _rcSetMsg(`⚠ Manual registrado — Faltan ${diff}: bat ${bat}, comp ${comp}, emp ${aperturasEmp}.`, false);
+  } else {
+    _rcSetMsg(`⚠ Manual registrado — Sobran ${Math.abs(diff)}: bat ${bat}, comp ${comp}, emp ${aperturasEmp}.`, false);
+  }
 }
 
 function _rcRenderRegistros() {
@@ -2608,6 +2657,7 @@ function _rcRenderRegistros() {
             <div>
               <span style="color:${color};font-weight:700">${icon} ${estado}</span>
               <span style="color:#9ca3af;font-size:11px;margin-left:8px">${hora}</span>
+              ${r.manual ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;font-weight:600">manual</span>' : ''}
             </div>
             <button onclick="rcDeleteRegistro(${i})"
               style="background:none;border:none;color:#dc2626;cursor:pointer;

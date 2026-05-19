@@ -373,6 +373,27 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-success btn-sm" id="btnIniciarReporte" onclick="iniciarReporteCaja()">▶ Iniciar Reporte</button>
             <a class="btn btn-secondary btn-sm" href="https://cheplast.organizatic.com/principal#/reportes/ventas" target="_blank">📋 Abrir SAS</a>
+            <button class="btn btn-secondary btn-sm" onclick="toggleRcManual()" style="border-color:#f59e0b;color:#92400e">✏ Manual</button>
+          </div>
+
+          <div id="rcManualPanel" style="display:none;margin-top:12px;padding:12px 14px;background:#fffbeb;border:1.5px solid #f59e0b;border-radius:8px">
+            <p style="font-size:12px;font-weight:700;color:#92400e;margin:0 0 10px">⚠ Ingreso manual — TROEFAE no disponible</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+              <div>
+                <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:3px">Aperturas TROEFAE</label>
+                <input id="rcManualBat" type="number" min="0" class="form-control" placeholder="0"
+                  style="width:130px;border-radius:6px;font-size:13px"
+                  onkeydown="if(event.key==='Enter') document.getElementById('rcManualComp').focus()">
+              </div>
+              <div>
+                <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:3px">Comprobantes SAS</label>
+                <input id="rcManualComp" type="number" min="0" class="form-control" placeholder="0"
+                  style="width:130px;border-radius:6px;font-size:13px"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();rcRegistrarManual()}">
+              </div>
+              <button class="btn btn-sm" onclick="rcRegistrarManual()"
+                style="background:#f59e0b;color:#fff;border:none;font-weight:700">Registrar</button>
+            </div>
           </div>
 
         </div>
