@@ -963,6 +963,7 @@ async function _syncBorrador() {
   try {
     const snap = await ref.get();
     if (snap.exists && snap.data().estado === 'cerrado') return;
+    if (!_borradorRef()) return; // cerrarCaja() corrió durante el await — abortar
     await ref.set(_buildBorradorDoc());
   } catch (e) { console.warn('Error sincronizando borrador:', e); }
 }
@@ -1343,8 +1344,12 @@ async function generarArqueo() {
 
 async function cerrarCaja() {
   closeCierreConfirm();
-  // Cancelar cualquier saveState() pendiente para que _syncBorrador() no sobreescriba el cierre
   clearTimeout(_estadoPushTimer);
+  // Nulificar historialBorradorId INMEDIATAMENTE antes de cualquier await:
+  // hace que _borradorRef() devuelva null en cualquier _syncBorrador() concurrente,
+  // eliminando la race condition aunque saveStateNow/beforeunload disparen durante el cierre.
+  const _borradorIdParaCierre = state.historialBorradorId;
+  state.historialBorradorId = null;
   const ventasFinal      = parseFloat(document.getElementById('ventasFinal').value) || 0;
   const totalYapes       = getTotalYapes();
   const yapesList        = getYapesList();
@@ -1372,8 +1377,8 @@ async function cerrarCaja() {
     configRef.set({ lastDenomQtys }, { merge: true }).catch(() => {});
   }
 
-  // Actualizar el borrador con datos finales (o crear nuevo si no existe)
-  const bRef = _borradorRef();
+  // Actualizar el borrador con datos finales (usa el ID capturado antes de nulificar)
+  const bRef = _borradorIdParaCierre ? historialCol.doc(_borradorIdParaCierre) : null;
   if (bRef) {
     try { await bRef.set({ ...report, estado: 'cerrado' }); }
     catch (e) {
