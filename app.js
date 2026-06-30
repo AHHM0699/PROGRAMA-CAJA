@@ -131,6 +131,7 @@ async function _initSession(user) {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('mainApp').style.display     = 'block';
   _applyRoleUI();
+  _aperturasDiaListenStart();
   if (userRole === 'employee') {
     await showCajaSelector();
   } else {
@@ -505,11 +506,76 @@ function _el(id) {
     (_pipWindow && !_pipWindow.closed && _pipWindow.document.getElementById(id));
 }
 
+// ── Aperturas a nivel de día (compartidas entre turnos/sesiones) ──────────
+// Antes las aperturas "con caja cerrada" vivían solo en localStorage del
+// dispositivo y nunca llegaban a los reportes. Ahora todo (fisica, fisica-
+// cerrada, registro) se guarda también en aperturasDia/{fecha} en Firestore,
+// para que un cierre de Tarde pueda mostrar lo que pasó en la Mañana.
+const aperturasDiaCol = db.collection('aperturasDia');
+let _aperturasDiaCache = { fecha: null, lista: [] };
+let _aperturasDiaUnsub = null;
+
+function _turnoDe(iso) {
+  const h = parseInt(
+    new Intl.DateTimeFormat('es-PE', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(new Date(iso)),
+    10
+  );
+  return h < 12 ? 'AM' : 'PM';
+}
+function _turnoLabel(t) { return t === 'AM' ? 'Mañana' : 'Tarde'; }
+function _ccTurnoActual() { return _turnoDe(new Date().toISOString()); }
+
+function _aperturasDiaListenStart() {
+  const hoy = _todayPE();
+  if (_aperturasDiaUnsub) _aperturasDiaUnsub();
+  _aperturasDiaCache = { fecha: hoy, lista: [] };
+  _aperturasDiaUnsub = aperturasDiaCol.doc(hoy).onSnapshot(snap => {
+    _aperturasDiaCache = { fecha: hoy, lista: snap.exists ? (snap.data().lista || []) : [] };
+    _actualizarContadorCC();
+    _actualizarContadorSelectorCC();
+  }, () => {});
+}
+
+function _aperturasDiaListaHoy() {
+  return _aperturasDiaCache.fecha === _todayPE() ? _aperturasDiaCache.lista : [];
+}
+
+function _ccUsadasTurno(turno) {
+  return _aperturasDiaListaHoy().filter(a => a.tipo === 'fisica-cerrada' && a.turno === turno).length;
+}
+
+async function _aperturasDiaPush(entry) {
+  const hoy = _todayPE();
+  try {
+    await aperturasDiaCol.doc(hoy).set(
+      { lista: firebase.firestore.FieldValue.arrayUnion(entry) },
+      { merge: true }
+    );
+  } catch (e) { console.warn('Error registrando apertura del día:', e); }
+}
+
+async function _aperturasDiaFetch(fecha) {
+  try {
+    const snap = await aperturasDiaCol.doc(fecha).get();
+    return snap.exists ? (snap.data().lista || []) : [];
+  } catch (e) { return null; } // null = sin red/error, el llamador decide el fallback
+}
+
+async function _buildAperturasReporte() {
+  const fecha = _rcFechaCaja();
+  const dia   = await _aperturasDiaFetch(fecha);
+  if (dia === null) return state.aperturasCaja || []; // sin red: usar solo lo de esta sesión
+  return dia.slice().sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+}
+
 // ── Apertura de gaveta POS-D via protocolo cajaabierta:// ────
 function _registrarAperturaCaja({ motivo, tipo }) {
+  const fecha = new Date().toISOString();
+  const turno = _turnoDe(fecha);
   if (!Array.isArray(state.aperturasCaja)) state.aperturasCaja = [];
-  state.aperturasCaja.push({ motivo, tipo, fecha: new Date().toISOString() });
+  state.aperturasCaja.push({ motivo, tipo, fecha, turno });
   saveState();
+  _aperturasDiaPush({ motivo, tipo, fecha, turno });
   _renderAperturasCaja();
   _rcRenderAperturasEmp();
 }
@@ -554,36 +620,15 @@ async function abrirCajaPOS() {
   }
 }
 
-function _ccUsadasHoy() {
-  const hoy = _todayPE();
-  const fromState = (state.aperturasCaja || []).filter(a =>
-    a.tipo === 'fisica-cerrada' &&
-    a.fecha && new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(a.fecha)) === hoy
-  ).length;
-  const fromLocal = parseInt(localStorage.getItem(`ccAperturas_${hoy}`) || '0');
-  return fromState + fromLocal;
-}
-
-function _ccLogHoy() {
-  const hoy = _todayPE();
-  try { return JSON.parse(localStorage.getItem(`ccAperturasLog_${hoy}`) || '[]'); }
-  catch (_) { return []; }
-}
-
-function _ccLogPush(entry) {
-  const hoy = _todayPE();
-  const list = _ccLogHoy();
-  list.push(entry);
-  localStorage.setItem(`ccAperturasLog_${hoy}`, JSON.stringify(list));
-}
-
 function _actualizarContadorCC() {
   const el  = document.getElementById('empCerradaContador');
   const btn = document.getElementById('btnAbrirCC');
   if (!el) return;
-  const usadas    = _ccUsadasHoy();
+  const turno     = _ccTurnoActual();
+  const usadas    = _ccUsadasTurno(turno);
   const restantes = 3 - usadas;
-  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles hoy` : '0/3 — límite alcanzado';
+  const label     = _turnoLabel(turno).toLowerCase();
+  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles (${label})` : `0/3 — límite ${label} alcanzado`;
   el.style.color  = restantes > 0 ? '#6b7280' : '#dc2626';
   if (btn) btn.disabled = restantes <= 0;
 }
@@ -599,9 +644,10 @@ function abrirGavetaCajaCerrada() {
   }
   if (motInp) motInp.style.borderColor = '';
 
-  const usadas = _ccUsadasHoy();
+  const turno  = _ccTurnoActual();
+  const usadas = _ccUsadasTurno(turno);
   if (usadas >= 3) {
-    if (fb) fb.textContent = '⚠ Límite alcanzado: ya abriste la gaveta 3 veces hoy.';
+    if (fb) fb.textContent = `⚠ Límite alcanzado: ya abriste la gaveta 3 veces esta ${_turnoLabel(turno).toLowerCase()}.`;
     return;
   }
 
@@ -620,17 +666,15 @@ function abrirGavetaCajaCerrada() {
   if (currentCajaId) {
     _registrarAperturaCaja({ motivo, tipo: 'fisica-cerrada' });
   } else {
-    const hoy = _todayPE();
-    _ccLogPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString() });
-    localStorage.setItem(`ccAperturas_${hoy}`, String(usadas + 1));
+    _aperturasDiaPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString(), turno });
   }
   if (motInp) motInp.value = '';
 
   const restantes = 2 - usadas;
   if (fb) {
     fb.textContent = restantes > 0
-      ? `✔ Gaveta abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} hoy`
-      : '✔ Gaveta abierta — límite del día alcanzado';
+      ? `✔ Gaveta abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} esta ${_turnoLabel(turno).toLowerCase()}`
+      : '✔ Gaveta abierta — límite del turno alcanzado';
     setTimeout(() => { if (fb) fb.textContent = ''; }, 3000);
   }
   _actualizarContadorCC();
@@ -640,7 +684,7 @@ function abrirGavetaCajaCerrada() {
 function _renderSelectorCCList() {
   const el = document.getElementById('selectorCCList');
   if (!el) return;
-  const list = _ccLogHoy();
+  const list = _aperturasDiaListaHoy().filter(a => a.tipo === 'fisica-cerrada');
   if (list.length === 0) { el.innerHTML = ''; return; }
   el.innerHTML =
     '<div style="font-size:12px;color:#6b7280;margin-bottom:4px">Aperturas de hoy</div>' +
@@ -650,7 +694,7 @@ function _renderSelectorCCList() {
       return `<div style="display:flex;justify-content:space-between;align-items:center;
                           padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
         <span style="color:#374151;min-width:0;overflow:hidden;text-overflow:ellipsis">
-          ${i+1}. <span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada</span>${escHtml(a.motivo)}
+          ${i+1}. <span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 ${_turnoLabel(a.turno || _turnoDe(a.fecha))}</span>${escHtml(a.motivo)}
         </span>
         <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
       </div>`;
@@ -661,9 +705,11 @@ function _actualizarContadorSelectorCC() {
   const el  = document.getElementById('selectorCCContador');
   const btn = document.getElementById('btnAbrirSelectorCC');
   if (!el) return;
-  const usadas    = _ccUsadasHoy();
+  const turno     = _ccTurnoActual();
+  const usadas    = _ccUsadasTurno(turno);
   const restantes = 3 - usadas;
-  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles hoy` : '0/3 — límite alcanzado';
+  const label     = _turnoLabel(turno).toLowerCase();
+  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles (${label})` : `0/3 — límite ${label} alcanzado`;
   el.style.color  = restantes > 0 ? '#6b7280' : '#dc2626';
   if (btn) btn.disabled = restantes <= 0;
   _renderSelectorCCList();
@@ -680,9 +726,10 @@ function abrirCajaSinCajaActiva() {
   }
   if (motInp) motInp.style.borderColor = '';
 
-  const usadas = _ccUsadasHoy();
+  const turno  = _ccTurnoActual();
+  const usadas = _ccUsadasTurno(turno);
   if (usadas >= 3) {
-    if (fb) fb.textContent = '⚠ Límite alcanzado: ya abriste la caja 3 veces hoy.';
+    if (fb) fb.textContent = `⚠ Límite alcanzado: ya abriste la caja 3 veces esta ${_turnoLabel(turno).toLowerCase()}.`;
     _actualizarContadorSelectorCC();
     return;
   }
@@ -699,16 +746,14 @@ function abrirCajaSinCajaActiva() {
     document.body.removeChild(a);
   } catch (_) {}
 
-  const hoy = _todayPE();
-  _ccLogPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString() });
-  localStorage.setItem(`ccAperturas_${hoy}`, String(usadas + 1));
+  _aperturasDiaPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString(), turno });
 
   if (motInp) motInp.value = '';
   const restantes = 2 - usadas;
   if (fb) {
     fb.textContent = restantes > 0
-      ? `✔ Caja abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} hoy`
-      : '✔ Caja abierta — límite del día alcanzado';
+      ? `✔ Caja abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} esta ${_turnoLabel(turno).toLowerCase()}`
+      : '✔ Caja abierta — límite del turno alcanzado';
     setTimeout(() => { if (fb) fb.textContent = ''; }, 3000);
   }
   _actualizarContadorSelectorCC();
@@ -1326,6 +1371,7 @@ async function generarArqueo() {
   const efectivoReal     = getCajaFinal();
   const efectivoEsperado = getEsperado();
   const diferencia       = round2(efectivoReal - efectivoEsperado);
+  const aperturasReporte = await _buildAperturasReporte();
 
   const report = {
     arqueo: true,
@@ -1334,7 +1380,7 @@ async function generarArqueo() {
     ultimoYape: state.ultimoYape, aperturaFecha: state.aperturaFecha,
     inicialMode: state.inicialMode, inicialBreakdown: state.inicialBreakdown || null,
     ventasFinal, totalYapes, yapesList, yapesRaw: state.yapesRaw,
-    eventos: state.eventos || [], aperturasCaja: state.aperturasCaja || [], rcRegistros: state.rcRegistros || [], cierreMode,
+    eventos: state.eventos || [], aperturasCaja: aperturasReporte, rcRegistros: state.rcRegistros || [], cierreMode,
     cierreBreakdown: cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
     efectivoEsperado, efectivoReal, diferencia,
   };
@@ -1356,6 +1402,7 @@ async function cerrarCaja() {
   const efectivoReal     = getCajaFinal();
   const efectivoEsperado = getEsperado();
   const diferencia       = round2(efectivoReal - efectivoEsperado);
+  const aperturasReporte = await _buildAperturasReporte();
 
   const report = {
     fecha: new Date().toISOString(), cajaId: currentCajaId, cajaNombre: currentCajaNombre || '',
@@ -1363,7 +1410,7 @@ async function cerrarCaja() {
     ultimoYape: state.ultimoYape, aperturaFecha: state.aperturaFecha,
     inicialMode: state.inicialMode, inicialBreakdown: state.inicialBreakdown || null,
     ventasFinal, totalYapes, yapesList, yapesRaw: state.yapesRaw,
-    eventos: state.eventos || [], aperturasCaja: state.aperturasCaja || [], rcRegistros: state.rcRegistros || [], cierreMode,
+    eventos: state.eventos || [], aperturasCaja: aperturasReporte, rcRegistros: state.rcRegistros || [], cierreMode,
     cierreBreakdown: cierreMode === 'denom' ? getDenomBreakdown('cierre') : null,
     efectivoEsperado, efectivoReal, diferencia,
   };
@@ -1811,9 +1858,11 @@ async function generarPDF(d) {
       const dt    = new Date(a.fecha);
       const fecha = dt.toLocaleDateString('es-PE', { timeZone: TZ, day:'2-digit', month:'2-digit', year:'numeric' });
       const hora  = dt.toLocaleTimeString('es-PE', { timeZone: TZ, hour:'2-digit', minute:'2-digit', second:'2-digit' });
-      const tag   = a.tipo === 'registro' ? '[Solo registro]' : a.tipo === 'fisica-cerrada' ? '[Caja cerrada]' : '[Gaveta]';
+      const tag    = a.tipo === 'registro' ? '[Solo registro]' : a.tipo === 'fisica-cerrada' ? '[Caja cerrada]' : '[Gaveta]';
+      const turno  = a.turno || _turnoDe(a.fecha);
+      const turnoTag = `[${_turnoLabel(turno)}]`;
       doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...DARK);
-      doc.text(`${i+1}. ${tag} ${a.motivo}`, mg+2, y);
+      doc.text(`${i+1}. ${turnoTag} ${tag} ${a.motivo}`, mg+2, y);
       doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...GRAY);
       doc.text(`${fecha} ${hora}`, pw-mg-2, y, { align:'right' });
       doc.setDrawColor(235,235,235); doc.line(mg, y+2.5, pw-mg, y+2.5); y+=7;
@@ -2421,7 +2470,7 @@ function toggleListaAperturas() {
   if (!lista) return;
   const visible = lista.style.display !== 'none';
   lista.style.display = visible ? 'none' : '';
-  const n = (state.aperturasCaja || []).length;
+  const n = _aperturasDiaListaHoy().length;
   if (btn) btn.textContent = visible ? `▼ Ver lista (${n})` : `▲ Ocultar (${n})`;
 }
 
@@ -2443,7 +2492,9 @@ function _rcRenderAperturasEmp() {
   const el  = document.getElementById('rcAperturasEmpList');
   const btn = document.getElementById('btnToggleAperturasRc');
   if (!el) return;
-  const lista = (state.aperturasCaja || []);
+  // Lista a nivel de DÍA completo (no solo la sesión actual) para que coincida
+  // con aperturasEmp usado en la reconciliación RC, incluso si hubo Mañana + Tarde.
+  const lista = _aperturasDiaListaHoy().slice().sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
   if (lista.length === 0) {
     el.innerHTML = '<span style="color:#9ca3af">Sin aperturas registradas.</span>';
     el.style.display = 'none';
@@ -2451,9 +2502,10 @@ function _rcRenderAperturasEmp() {
     return;
   }
   el.innerHTML = lista.map((a, i) => {
-    const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const hora  = new Date(a.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const turno = a.turno || _turnoDe(a.fecha);
     return `<div style="padding:5px 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between">
-      <span style="color:#374151">${i+1}. ${escHtml(a.motivo)}</span>
+      <span style="color:#374151">${i+1}. <span style="background:#e5e7eb;color:#374151;font-size:10px;padding:1px 5px;border-radius:8px;margin-right:5px">${_turnoLabel(turno)}</span>${escHtml(a.motivo)}</span>
       <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
     </div>`;
   }).join('') + `<div style="padding-top:6px;font-weight:600;color:#1a6b3c">Total: ${lista.length}</div>`;
@@ -2480,11 +2532,17 @@ function _rcFechaDeUpdatedAt(updatedAt) {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(updatedAt);
 }
 
-function _rcMostrarDatos(data, fecha, btn) {
+let _rcAperturasEmpActual = 0;
+
+async function _rcMostrarDatos(data, fecha, btn) {
   const cajaTimes   = Array.isArray(data.times) ? data.times : [];
   _rcCajaTimes      = cajaTimes;
   const aperturasBat = cajaTimes.length;
-  const aperturasEmp = (state.aperturasCaja || []).length;
+  // Aperturas del DÍA consultado (no solo la sesión actual), para que cuadre
+  // con TROEFAE aunque haya habido una caja Mañana y otra Tarde ese día.
+  const diaLista     = await _aperturasDiaFetch(fecha);
+  const aperturasEmp = diaLista === null ? (state.aperturasCaja || []).length : diaLista.length;
+  _rcAperturasEmpActual = aperturasEmp;
 
   if (aperturasBat === 0) {
     _rcSetMsg(`Sin aperturas registradas en TROEFAE para el ${fecha}.`, false);
@@ -2565,7 +2623,7 @@ function rcRegistrarComprobantes() {
   if (isNaN(comprobantes) || comprobantes < 0) { if (input) input.focus(); return; }
 
   const aperturasBat = (_rcCajaTimes || []).length;
-  const aperturasEmp = (state.aperturasCaja || []).length;
+  const aperturasEmp = _rcAperturasEmpActual;
   const esperado     = comprobantes + aperturasEmp;
   const diff         = aperturasBat - esperado;   // 0 = cuadra
 
