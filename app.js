@@ -1287,10 +1287,10 @@ function _updateConteoEmpleadoBadge() {
   const btn   = document.getElementById('btnToggleConteoEmp');
   if (!badge) return;
   const c = state.conteoEmpleado;
-  badge.textContent = c?.total ? `S/. ${c.total.toFixed(2)}` : 'Sin contar';
+  badge.textContent = 'Contar';
   if (btn) {
-    btn.style.background = c?.total ? '#bbf7d0' : '#e5e7eb';
-    btn.style.color      = c?.total ? '#14532d' : '#374151';
+    btn.style.background = c?.total ? '#bbf7d0' : '#fecaca';
+    btn.style.color      = c?.total ? '#14532d' : '#7f1d1d';
   }
 }
 
