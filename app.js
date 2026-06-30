@@ -1279,11 +1279,29 @@ function _saveConteoEmpleado() {
       ? `✔ Guardado ${new Date().toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })}`
       : '';
   }
+  _updateConteoEmpleadoBadge();
+}
+
+function _updateConteoEmpleadoBadge() {
+  const badge = document.getElementById('empConteoBadge');
+  if (!badge) return;
+  const c = state.conteoEmpleado;
+  badge.textContent = c?.total ? `S/. ${c.total.toFixed(2)}` : 'Sin contar';
+}
+
+function toggleConteoEmpleado() {
+  const body = document.getElementById('empConteoBody');
+  const btn  = document.getElementById('btnToggleConteoEmp');
+  if (!body) return;
+  const visible = body.style.display !== 'none';
+  body.style.display = visible ? 'none' : '';
+  if (btn) btn.textContent = visible ? '▼ Ver' : '▲ Ocultar';
 }
 
 let _conteoEmpleadoPrefillDone = false;
 
 function _renderConteoEmpleadoSide() {
+  _updateConteoEmpleadoBadge();
   if (_conteoEmpleadoPrefillDone) return;
   _conteoEmpleadoPrefillDone = true;
   const qtys = state.conteoEmpleado?.qtys;
