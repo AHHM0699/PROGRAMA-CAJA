@@ -1284,18 +1284,23 @@ function _saveConteoEmpleado() {
 
 function _updateConteoEmpleadoBadge() {
   const badge = document.getElementById('empConteoBadge');
+  const btn   = document.getElementById('btnToggleConteoEmp');
   if (!badge) return;
   const c = state.conteoEmpleado;
   badge.textContent = c?.total ? `S/. ${c.total.toFixed(2)}` : 'Sin contar';
+  if (btn) {
+    btn.style.background = c?.total ? '#bbf7d0' : '#e5e7eb';
+    btn.style.color      = c?.total ? '#14532d' : '#374151';
+  }
 }
 
 function toggleConteoEmpleado() {
-  const body = document.getElementById('empConteoBody');
-  const btn  = document.getElementById('btnToggleConteoEmp');
+  const body    = document.getElementById('empConteoBody');
+  const chevron = document.getElementById('empConteoChevron');
   if (!body) return;
   const visible = body.style.display !== 'none';
   body.style.display = visible ? 'none' : '';
-  if (btn) btn.textContent = visible ? '▼ Ver' : '▲ Ocultar';
+  if (chevron) chevron.textContent = visible ? '▼' : '▲';
 }
 
 let _conteoEmpleadoPrefillDone = false;
