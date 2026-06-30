@@ -50,6 +50,7 @@ const STATE_FIELDS = [
   'cajaAbierta', 'nombre', 'cajaInicial', 'ventasHastaAhora', 'ultimoYape',
   'aperturaFecha', 'inicialMode', 'inicialBreakdown',
   'eventos', 'yapesRaw', 'aperturasCaja', 'rcRegistros', '_ts', 'historialBorradorId',
+  'conteoEmpleado',
 ];
 
 // ============================================================
@@ -61,7 +62,7 @@ function _defaultState() {
     ventasHastaAhora: 0, ultimoYape: 0, aperturaFecha: null,
     inicialMode: 'monto', inicialBreakdown: null,
     eventos: [], yapesRaw: '', aperturasCaja: [], rcRegistros: [], _ts: 0,
-    historialBorradorId: null,
+    historialBorradorId: null, conteoEmpleado: null,
   };
 }
 
@@ -99,8 +100,9 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('beforeunload', () => { saveStateNow(); });
 
 window.addEventListener('DOMContentLoaded', () => {
-  buildDenomTable('inicial', 'inicialDenomTable');
-  buildDenomTable('cierre',  'cierreDenomTable');
+  buildDenomTable('inicial',   'inicialDenomTable');
+  buildDenomTable('cierre',    'cierreDenomTable');
+  buildDenomTable('empConteo', 'empConteoDenomTable');
 
   const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
   document.getElementById('headerDate').textContent =
@@ -362,6 +364,8 @@ async function eliminarCajaDeListado(cajaId) {
 async function selectCaja(cajaId) {
   currentCajaId = cajaId;
   cierreMode = 'monto';
+  _conteoEmpleadoPrefillDone = false;
+  _conteoCierrePrefillDone   = false;
 
   state = _defaultState();
   await _loadStateFromFirestore();
@@ -423,7 +427,11 @@ function showView(view) {
   document.getElementById('view' + cap).classList.remove('hidden');
 
   if (view === 'apertura') prefillInicialDenoms();
-  if (view === 'cierre')   { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); openReporteCaja(); }
+  if (view === 'cierre')   {
+    renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); openReporteCaja();
+    _renderConteoEmpleadoBanner();
+    cargarConteoEmpleadoEnCierre(false);
+  }
   if (view === 'reportes') renderReportes();
 }
 
@@ -453,6 +461,7 @@ function _showEmployeeView() {
     renderEventos();
     _renderEmpYapesList();
     _renderAperturasCaja();
+    _renderConteoEmpleadoSide();
   }
 }
 
@@ -481,7 +490,11 @@ function _renderEmpYapesList() {
 
 function refreshCurrentView() {
   const views = {
-    viewCierre:   () => { renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado(); },
+    viewCierre:   () => {
+      renderResumen(); renderEventos(); _syncYapesToDom(); calcularEsperado();
+      _renderConteoEmpleadoBanner();
+      cargarConteoEmpleadoEnCierre(false);
+    },
     viewEmpleado: () => _showEmployeeView(),
     viewApertura: () => prefillInicialDenoms(),
   };
@@ -1120,13 +1133,20 @@ function buildDenomTable(section, containerId) {
   container.innerHTML = html;
 }
 
+const DENOM_TOTAL_IDS = {
+  inicial:    'inicialDenomTotal',
+  cierre:     'cierreDenomTotal',
+  empConteo:  'empConteoDenomTotal',
+};
+
 function onDenomInput(section, idx) {
   const qty     = parseFloat(document.getElementById(`${section}Qty${idx}`).value) || 0;
   document.getElementById(`${section}Sub${idx}`).textContent = fmt(round2(qty * DENOMS[idx].val));
   const total   = getDenomTotal(section);
-  const totalId = section === 'inicial' ? 'inicialDenomTotal' : 'cierreDenomTotal';
-  document.getElementById(totalId).textContent = fmt(total);
-  if (section === 'cierre') calcularDiferencia();
+  const totalId = DENOM_TOTAL_IDS[section];
+  if (totalId) document.getElementById(totalId).textContent = fmt(total);
+  if (section === 'cierre')    calcularDiferencia();
+  if (section === 'empConteo') _saveConteoEmpleado();
 }
 
 function getDenomTotal(section) {
@@ -1235,6 +1255,88 @@ function prefillInicialDenoms() {
     if (!qty) return;
     const input = document.getElementById(`inicialQty${i}`);
     if (input) { input.value = qty; onDenomInput('inicial', i); }
+  });
+}
+
+// ============================================================
+//  CONTEO DE EFECTIVO DEL EMPLEADO
+//  El empleado cuenta el efectivo por denominación, sin ver si
+//  cuadra contra lo esperado — esos datos solo le sirven al
+//  administrador para agilizar su propio cierre.
+// ============================================================
+function _saveConteoEmpleado() {
+  const qtys  = DENOMS.map((_, i) => parseFloat(document.getElementById(`empConteoQty${i}`)?.value) || 0);
+  const total = getDenomTotal('empConteo');
+  if (!qtys.some(q => q > 0)) {
+    state.conteoEmpleado = null;
+  } else {
+    state.conteoEmpleado = { qtys, total, fecha: new Date().toISOString() };
+  }
+  saveState();
+  const fb = document.getElementById('empConteoGuardado');
+  if (fb) {
+    fb.textContent = state.conteoEmpleado
+      ? `✔ Guardado ${new Date().toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })}`
+      : '';
+  }
+}
+
+let _conteoEmpleadoPrefillDone = false;
+
+function _renderConteoEmpleadoSide() {
+  if (_conteoEmpleadoPrefillDone) return;
+  _conteoEmpleadoPrefillDone = true;
+  const qtys = state.conteoEmpleado?.qtys;
+  if (!Array.isArray(qtys)) return;
+  qtys.forEach((qty, i) => {
+    if (!qty) return;
+    const input = document.getElementById(`empConteoQty${i}`);
+    if (input) { input.value = qty; onDenomInput('empConteo', i); }
+  });
+  const fb = document.getElementById('empConteoGuardado');
+  if (fb && state.conteoEmpleado?.fecha) {
+    const hora = new Date(state.conteoEmpleado.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+    fb.textContent = `✔ Guardado ${hora}`;
+  }
+}
+
+function _renderConteoEmpleadoBanner() {
+  const banner = document.getElementById('conteoEmpleadoBanner');
+  if (!banner) return;
+  const c = state.conteoEmpleado;
+  if (!c || !c.qtys?.some(q => q > 0)) { banner.classList.add('hidden'); return; }
+  const hora = new Date(c.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+  document.getElementById('conteoEmpleadoBannerTxt').innerHTML =
+    `📋 El empleado contó <b>${fmt(c.total)}</b> a las ${hora}`;
+  banner.classList.remove('hidden');
+}
+
+// force=false (llamada automática): solo rellena una vez por sesión de caja, y solo si
+//   los campos de cierre siguen vacíos — así no pisa el modo "monto" que el admin haya
+//   elegido a propósito en una sincronización posterior.
+// force=true (botón manual): siempre sobreescribe, pidiendo confirmación si ya hay datos.
+let _conteoCierrePrefillDone = false;
+
+function cargarConteoEmpleadoEnCierre(force) {
+  const qtys = state.conteoEmpleado?.qtys;
+  if (!Array.isArray(qtys) || !qtys.some(q => q > 0)) return;
+
+  if (!force) {
+    if (_conteoCierrePrefillDone) return;
+    _conteoCierrePrefillDone = true;
+  }
+
+  const allEmpty = DENOMS.every((_, i) => !(parseFloat(document.getElementById(`cierreQty${i}`)?.value) || 0));
+  if (!force && !allEmpty) return;
+  if (force && !allEmpty) {
+    if (!confirm('Esto reemplazará los valores que ya ingresaste por el conteo del empleado. ¿Continuar?')) return;
+  }
+
+  setMode('cierre', 'denom');
+  DENOMS.forEach((_, i) => {
+    const input = document.getElementById(`cierreQty${i}`);
+    const qty   = qtys[i] || 0;
+    if (input) { input.value = qty || ''; onDenomInput('cierre', i); }
   });
 }
 

@@ -275,6 +275,12 @@
           </div>
         </div>
         <div class="card-body">
+          <div id="conteoEmpleadoBanner" class="hidden" style="background:#eff6ff;border:1px solid #bfdbfe;
+              border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;
+              align-items:center;gap:10px;flex-wrap:wrap">
+            <span id="conteoEmpleadoBannerTxt" style="font-size:13px;color:#1e40af"></span>
+            <button class="btn btn-secondary btn-sm" onclick="cargarConteoEmpleadoEnCierre(true)">🔄 Cargar conteo del empleado</button>
+          </div>
           <div id="cierreModoDenom" class="hidden">
             <div id="cierreDenomTable"></div>
             <div class="denom-footer">
@@ -540,6 +546,23 @@
             <div id="cardEventosEmp" class="card" style="display:none">
               <div class="card-head"><h3>📋 Eventos registrados</h3></div>
               <div class="card-body" id="eventosListEmp"></div>
+            </div>
+
+            <!-- Conteo de efectivo por denominación (sin comparar contra esperado) -->
+            <div class="card">
+              <div class="card-head"><h3>🔢 Conteo de Efectivo</h3></div>
+              <div class="card-body">
+                <p style="font-size:13px;color:#6b7280;margin-bottom:10px">
+                  Cuenta el efectivo en caja por denominación. Esto le ayuda al administrador a
+                  agilizar el cierre — no necesitas calcular si cuadra o no.
+                </p>
+                <div id="empConteoDenomTable"></div>
+                <div class="denom-footer">
+                  <span>Total contado</span>
+                  <span class="denom-total-val" id="empConteoDenomTotal">S/. 0.00</span>
+                </div>
+                <span id="empConteoGuardado" class="feedback-text"></span>
+              </div>
             </div>
 
             <!-- Yapes — solo ingreso -->
