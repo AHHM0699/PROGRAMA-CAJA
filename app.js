@@ -279,8 +279,8 @@ async function _renderCajasLista() {
     const snap  = await db.collection('cajas').get();
     const cajas = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
-      // Ignorar documentos fantasma (sin nombre, sin fecha de apertura, sin monto inicial)
-      .filter(c => !c.eliminada && (c.nombre || c.aperturaFecha || c.cajaInicial > 0 || c.cajaAbierta))
+      // Solo cajas explícitamente abiertas; excluye eliminadas y documentos fantasma
+      .filter(c => !c.eliminada && c.cajaAbierta)
       .sort((a, b) => new Date(b.aperturaFecha || 0) - new Date(a.aperturaFecha || 0));
 
     if (cajas.length === 0) {
@@ -1075,8 +1075,8 @@ function startRealtimeSync() {
   if (_unsubscribeSync) _unsubscribeSync();
   if (!currentCajaId) return;
   _unsubscribeSync = cajaRef().onSnapshot(snap => {
-    if (!snap.exists) {
-      // Caja eliminada (cerrada por otro dispositivo) → volver al selector
+    if (!snap.exists || snap.data().eliminada) {
+      // Caja eliminada o marcada cerrada por otro dispositivo → volver al selector
       showSyncToast('📋 Caja cerrada en otro dispositivo');
       stopRealtimeSync();
       currentCajaId     = null;
@@ -1568,12 +1568,14 @@ async function cerrarCaja() {
   currentCajaId = null;
 
   clearTimeout(_estadoPushTimer);
-  try { await _refFinal.set(_stateToDoc()); } catch (_) {}
 
-  // Eliminar la caja de Firestore (el historial ya la tiene)
-  try { await _refFinal.delete(); } catch (_) {
-    try { await _refFinal.set({ eliminada: true, cajaAbierta: false, _ts: Date.now() }, { merge: true }); } catch (e2) { console.warn('Error eliminando caja:', e2); }
-  }
+  // Paso 1: marcar como cerrada/eliminada PRIMERO.
+  // Así, si el delete definitivo falla (red, reglas, offline-persistence), el documento
+  // no queda como "abierto" en el selector — y los onSnapshot de otros dispositivos
+  // detectan el campo eliminada:true y navegan al selector automáticamente.
+  try { await _refFinal.set({ cajaAbierta: false, eliminada: true, _ts: Date.now() }, { merge: true }); } catch (_) {}
+  // Paso 2: borrar definitivamente el documento de cajas.
+  try { await _refFinal.delete(); } catch (_) { /* ya marcado como eliminado en el paso anterior */ }
 
   await generarPDF(report);
   resetAfterClose();
