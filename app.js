@@ -137,8 +137,27 @@ async function _initSession(user) {
   if (userRole === 'employee') {
     await showCajaSelector();
   } else {
+    _autoFixGhostCajas(); // silencioso, no bloquea
     showHomeView();
   }
+}
+
+// Detecta y elimina documentos fantasma en la colección cajas:
+// cajas marcadas cajaAbierta:true pero que ya tienen un historial cerrado.
+async function _autoFixGhostCajas() {
+  try {
+    const snap = await db.collection('cajas').where('cajaAbierta', '==', true).get();
+    if (snap.empty) return;
+    for (const doc of snap.docs) {
+      const cajaId = doc.id;
+      const hist = await historialCol
+        .where('cajaId', '==', cajaId).where('estado', '==', 'cerrado').limit(1).get();
+      if (hist.empty) continue; // caja genuinamente abierta, no tocar
+      console.log('[autoFix] caja fantasma detectada:', cajaId, doc.data().nombre);
+      await doc.ref.set({ cajaAbierta: false, eliminada: true, _ts: Date.now() }, { merge: true });
+      try { await doc.ref.delete(); } catch (_) {}
+    }
+  } catch (e) { console.warn('[autoFix] error:', e); }
 }
 
 function _showLoginScreen() {
