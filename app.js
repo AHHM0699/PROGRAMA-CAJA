@@ -137,7 +137,8 @@ async function _initSession(user) {
   if (userRole === 'employee') {
     await showCajaSelector();
   } else {
-    _autoFixGhostCajas(); // silencioso, no bloquea
+    _autoFixGhostCajas();      // silencioso, no bloquea
+    _autoFixOrphanBorradores(); // silencioso, no bloquea
     showHomeView();
   }
 }
@@ -158,6 +159,31 @@ async function _autoFixGhostCajas() {
       try { await doc.ref.delete(); } catch (_) {}
     }
   } catch (e) { console.warn('[autoFix] error:', e); }
+}
+
+// Detecta y cierra borradores huérfanos en historial:
+// entradas con estado:'borrador' cuya caja ya no existe o ya fue cerrada.
+async function _autoFixOrphanBorradores() {
+  try {
+    const snap = await historialCol.where('estado', '==', 'borrador').get();
+    if (snap.empty) return;
+    for (const doc of snap.docs) {
+      const cajaId = doc.data().cajaId;
+      let orphan = false;
+      if (!cajaId) {
+        orphan = true;
+      } else {
+        const cajaSnap = await db.doc(`cajas/${cajaId}`).get();
+        // Huérfano si la caja no existe, está eliminada, o ya no está abierta
+        if (!cajaSnap.exists || cajaSnap.data().eliminada || !cajaSnap.data().cajaAbierta) {
+          orphan = true;
+        }
+      }
+      if (!orphan) continue;
+      console.log('[autoFix] borrador huérfano cerrado:', doc.id, doc.data().cajaNombre);
+      await doc.ref.set({ estado: 'cerrado' }, { merge: true });
+    }
+  } catch (e) { console.warn('[autoFix borrador] error:', e); }
 }
 
 function _showLoginScreen() {
