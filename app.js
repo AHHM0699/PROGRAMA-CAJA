@@ -139,6 +139,7 @@ async function _initSession(user) {
   } else {
     _autoFixGhostCajas();      // silencioso, no bloquea
     _autoFixOrphanBorradores(); // silencioso, no bloquea
+    _fix0707MANANA();           // one-time: parchar historial del 07/07 con datos completos
     showHomeView();
   }
 }
@@ -159,6 +160,83 @@ async function _autoFixGhostCajas() {
       try { await doc.ref.delete(); } catch (_) {}
     }
   } catch (e) { console.warn('[autoFix] error:', e); }
+}
+
+// One-time patch: completa el historial de MAÑANA 07/07 con todos los datos de cierre del PDF.
+// Se ejecuta en cada login admin hasta que lo encuentre y lo parchee (flag en localStorage).
+async function _fix0707MANANA() {
+  if (localStorage.getItem('_fix0707done')) return;
+  try {
+    const snap = await historialCol.where('cajaNombre', '==', 'MAÑANA 07/07').get();
+    if (snap.empty) { localStorage.setItem('_fix0707done', '1'); return; }
+    const target = snap.docs.find(d => !d.data().ventasFinal);
+    if (!target) { localStorage.setItem('_fix0707done', '1'); return; }
+    const cajaId = target.data().cajaId || null;
+    await target.ref.set({
+      estado: 'cerrado',
+      fecha: '2026-07-08T13:34:29.000Z',
+      cajaId,
+      cajaNombre: 'MAÑANA 07/07',
+      cajaInicial: 399.60,
+      ventasHastaAhora: 0,
+      ultimoYape: 0,
+      aperturaFecha: '2026-07-07T13:21:14.000Z',
+      inicialMode: 'denom',
+      inicialBreakdown: [
+        { label: 'S/. 0.10', qty: 4,  subtotal: 0.40,  tipo: 'Moneda' },
+        { label: 'S/. 0.20', qty: 1,  subtotal: 0.20,  tipo: 'Moneda' },
+        { label: 'S/. 0.50', qty: 8,  subtotal: 4.00,  tipo: 'Moneda' },
+        { label: 'S/. 1.00', qty: 55, subtotal: 55.00, tipo: 'Moneda' },
+        { label: 'S/. 2.00', qty: 20, subtotal: 40.00, tipo: 'Moneda' },
+        { label: 'S/. 5.00', qty: 8,  subtotal: 40.00, tipo: 'Moneda' },
+        { label: 'S/. 10',   qty: 7,  subtotal: 70.00, tipo: 'Billete' },
+        { label: 'S/. 20',   qty: 7,  subtotal: 140.00,tipo: 'Billete' },
+        { label: 'S/. 50',   qty: 1,  subtotal: 50.00, tipo: 'Billete' },
+      ],
+      ventasFinal: 3224.80,
+      totalYapes: 1098.00,
+      yapesList: [47,34.9,86.9,3,36.6,6.5,88,32.6,85,23.4,15.9,24.9,5,215,2.5,47.9,39,66.8,23.5,24,5.5,7,76.9,49.9,12.9,20.5,16.9],
+      yapesRaw: '47.00\n34.90\n86.90\n3.00\n36.60\n6.50\n88.00\n32.60\n85.00\n23.40\n15.90\n24.90\n5.00\n215.00\n2.50\n47.90\n39.00\n66.80\n23.50\n24.00\n5.50\n7.00\n76.90\n49.90\n12.90\n20.50\n16.90',
+      eventos: [
+        { id: 1751896020001, tipo: 'Egreso', subtipo: null, desc: 'DEPOSITO AGENTE', monto: 35,   usd: null, tc: null, fecha: '2026-07-07T13:47:00.000Z', incluirEnFlujo: true },
+        { id: 1751916840002, tipo: 'Egreso', subtipo: null, desc: 'ABDON',           monto: 1700, usd: null, tc: null, fecha: '2026-07-07T19:14:00.000Z', incluirEnFlujo: true },
+        { id: 1751921580003, tipo: 'Egreso', subtipo: null, desc: 'ABDON',           monto: 100,  usd: null, tc: null, fecha: '2026-07-07T20:33:00.000Z', incluirEnFlujo: true },
+        { id: 1751932980004, tipo: 'Egreso', subtipo: null, desc: 'DEPOSITO AGENTE', monto: 200,  usd: null, tc: null, fecha: '2026-07-07T23:43:00.000Z', incluirEnFlujo: true },
+      ],
+      aperturasCaja: [
+        { motivo: 'conteo inicial', tipo: 'fisica', fecha: '2026-07-07T13:47:50.000Z', turno: 'AM' },
+        { motivo: 'contar',         tipo: 'fisica', fecha: '2026-07-07T13:49:09.000Z', turno: 'AM' },
+        { motivo: 'retiro',         tipo: 'fisica', fecha: '2026-07-07T19:14:50.000Z', turno: 'PM' },
+        { motivo: 'cambio',         tipo: 'fisica', fecha: '2026-07-07T19:38:52.000Z', turno: 'PM' },
+        { motivo: 'conteo',         tipo: 'fisica', fecha: '2026-07-07T20:07:20.000Z', turno: 'PM' },
+        { motivo: 'retiro',         tipo: 'fisica', fecha: '2026-07-07T20:33:26.000Z', turno: 'PM' },
+        { motivo: 'retiro',         tipo: 'fisica', fecha: '2026-07-07T20:48:36.000Z', turno: 'PM' },
+        { motivo: 'CAMBIO',         tipo: 'fisica', fecha: '2026-07-07T22:44:48.000Z', turno: 'PM' },
+        { motivo: 'CONTEO FINAL',   tipo: 'fisica', fecha: '2026-07-07T23:23:18.000Z', turno: 'PM' },
+        { motivo: 'RETIRO',         tipo: 'fisica', fecha: '2026-07-07T23:43:47.000Z', turno: 'PM' },
+      ],
+      rcRegistros: [
+        { aperturasBat: 1, aperturasEmp: 11, comprobantes: 1, fecha: '2026-07-08T13:34:00.000Z', manual: true },
+      ],
+      cierreMode: 'denom',
+      cierreBreakdown: [
+        { label: 'S/. 0.10', qty: 10, subtotal: 1.00,  tipo: 'Moneda' },
+        { label: 'S/. 0.20', qty: 2,  subtotal: 0.40,  tipo: 'Moneda' },
+        { label: 'S/. 0.50', qty: 6,  subtotal: 3.00,  tipo: 'Moneda' },
+        { label: 'S/. 1.00', qty: 53, subtotal: 53.00, tipo: 'Moneda' },
+        { label: 'S/. 2.00', qty: 12, subtotal: 24.00, tipo: 'Moneda' },
+        { label: 'S/. 5.00', qty: 2,  subtotal: 10.00, tipo: 'Moneda' },
+        { label: 'S/. 10',   qty: 8,  subtotal: 80.00, tipo: 'Billete' },
+        { label: 'S/. 20',   qty: 1,  subtotal: 20.00, tipo: 'Billete' },
+        { label: 'S/. 50',   qty: 6,  subtotal: 300.00,tipo: 'Billete' },
+      ],
+      efectivoEsperado: 491.40,
+      efectivoReal:     491.40,
+      diferencia:       0,
+    });
+    console.log('[fix0707] ✔ MAÑANA 07/07 historial actualizado con datos completos del PDF');
+    localStorage.setItem('_fix0707done', '1');
+  } catch (e) { console.warn('[fix0707] error:', e); }
 }
 
 // Detecta y cierra borradores huérfanos en historial:
