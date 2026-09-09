@@ -362,6 +362,24 @@
             <div id="rcAperturasEmpList" style="font-size:13px;color:#6b7280;display:none"></div>
           </div>
 
+          <!-- Carga del reporte de ventas del SAS: arrastrar, pegar o buscar -->
+          <div id="rcZona" style="display:none;margin-bottom:12px">
+            <div class="rc-zona" id="rcZonaCaja">
+              <div style="font-size:24px;line-height:1">📄</div>
+              <div style="font-weight:600;margin-top:5px">Arrastrá el reporte del SAS acá</div>
+              <div style="font-size:12px;color:#6b7280;margin-top:4px">
+                o pegalo con <b>Ctrl+V</b> · <span class="rc-enlace">buscar el archivo</span>
+              </div>
+            </div>
+            <div style="text-align:center;margin-top:6px">
+              <span class="rc-enlace" style="font-size:12px" onclick="rcMostrarFormComprobantes()">¿No tenés el PDF? Ingresar la cantidad a mano</span>
+            </div>
+          </div>
+          <input type="file" id="rcArchivoSAS" accept="application/pdf,.pdf,.txt" hidden>
+
+          <!-- Resultado del cuadre: solo lo anómalo -->
+          <div id="rcResultado" style="margin-bottom:12px"></div>
+
           <div id="rcFormComprobantes" style="display:none;margin-bottom:12px;padding:10px 12px;background:#f9fafb;border-radius:8px">
             <p id="rcAperturasInfo" style="font-size:13px;font-weight:600;color:#1a6b3c;margin:0 0 8px"></p>
             <p style="font-size:13px;color:#374151;margin:0 0 8px">Ingresa cuántos comprobantes hay en el SAS:</p>
@@ -933,7 +951,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 
-<!-- jsPDF y xlsx se cargan bajo demanda (lazy) para reducir uso de memoria -->
+<!-- jsPDF, xlsx y pdf.js se cargan bajo demanda (lazy) para reducir uso de memoria -->
+<script src="cuadre.js"></script>
 <script src="app.js"></script>
 <script>
   if ('serviceWorker' in navigator) {

@@ -1096,6 +1096,14 @@ const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.
 const JSPDF_SRI = 'sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==';
 const XLSX_URL  = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.mini.min.js';
 const XLSX_SRI  = 'sha512-NDQhXrK2pOCL18FV5/Nc+ya9Vz+7o8dJV1IGRwuuYuRMFhAR0allmjWdZCSHFLDYgMvXKyN2jXlSy2JJEmq+ZA==';
+// pdf.js — lee el reporte de ventas del SAS en el Reporte de Caja.
+// El worker se carga como script normal: pdf.js encuentra window.pdfjsWorker y
+// trabaja en el hilo principal, sin depender de crear un Worker ni de bajar
+// nada al momento de abrir el PDF (son 2 páginas, el costo no se nota).
+const PDFJS_URL     = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_SRI     = 'sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ==';
+const PDFJSW_URL    = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const PDFJSW_SRI    = 'sha512-BbrZ76UNZq5BhH7LL7pn9A4TKQpQeNCHOo65/akfelcIBbcVvYWOFQKPXIrykE3qZxYjmDX573oa4Ywsc7rpTw==';
 
 // ============================================================
 //  STATE — FIRESTORE PERSISTENCE + REAL-TIME SYNC
@@ -2129,8 +2137,14 @@ async function generarPDF(d) {
       const comp     = r.comprobantes ?? 0;
       const esperado = comp + emp;
       const diff     = bat - esperado;
-      const color    = diff === 0 ? GREEN : RED;
-      const label    = diff === 0 ? '✔ Cuadra' : diff > 0 ? `⚠ Faltan ${diff}` : `⚠ Sobran ${Math.abs(diff)}`;
+      // Cuando el reporte se cuadró por horas, el veredicto es el nº de
+      // anomalías; en los registros manuales o viejos, la resta de siempre.
+      const porHora  = r.anomalias !== undefined && r.anomalias !== null;
+      const mal      = porHora ? r.anomalias > 0 : diff !== 0;
+      const color    = mal ? RED : GREEN;
+      const label    = porHora
+        ? (r.anomalias === 0 ? '✔ Sin anomalías' : `⚠ ${r.anomalias} apertura(s) sin justificar`)
+        : (diff === 0 ? '✔ Cuadra' : diff > 0 ? `⚠ Faltan ${diff}` : `⚠ Sobran ${Math.abs(diff)}`);
       y = newPageIfNeeded(y, 14);
       doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...color);
       doc.text(`${i+1}. ${label}${r.manual ? ' (manual)' : ''}`, mg+2, y);
@@ -2138,7 +2152,16 @@ async function generarPDF(d) {
       doc.text(hora, pw-mg-2, y, { align:'right' });
       y += 5;
       doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...DARK);
-      doc.text(`Bat: ${bat}  =  Comprobantes: ${comp}  +  Empleado: ${emp}${diff !== 0 ? `  (suma: ${esperado})` : ''}`, mg+4, y);
+      doc.text(porHora
+        ? `Aperturas: ${bat}   Comprobantes: ${comp}   Empleado: ${emp}`
+        : `Bat: ${bat}  =  Comprobantes: ${comp}  +  Empleado: ${emp}${diff !== 0 ? `  (suma: ${esperado})` : ''}`,
+        mg+4, y);
+      if (porHora && r.anomaliasHoras?.length) {
+        y += 5;
+        doc.setFontSize(9); doc.setTextColor(...RED);
+        doc.text(`Sin justificar: ${r.anomaliasHoras.join(', ')}`, mg+4, y);
+        doc.setTextColor(...DARK);
+      }
       doc.setDrawColor(235,235,235); doc.line(mg, y+3, pw-mg, y+3); y+=7;
     }); y+=2;
   }
@@ -2672,7 +2695,44 @@ function tryParseJSON(str, fallback) {
 //  REPORTE DE CAJA (RC) — aperturas vs comprobantes SAS
 // ============================================================
 let _rcCajaTimes = [];
+let _rcCompsSAS  = [];      // comprobantes leídos del reporte del SAS (con hora de emisión)
+let _rcCuadre    = null;    // último resultado de Cuadre.cuadrar()
+let _rcJustDia   = [];      // justificaciones del empleado del día consultado
 const SAS_REPORTE_URL = 'https://cheplast.organizatic.com/principal#/reportes/ventas';
+
+// ── pdf.js: carga perezosa ───────────────────────────────────────
+async function _rcAsegurarPdfJs() {
+  if (window.pdfjsLib && window.pdfjsWorker) return;
+  await loadScript(PDFJS_URL, PDFJS_SRI);
+  await loadScript(PDFJSW_URL, PDFJSW_SRI);   // define window.pdfjsWorker
+  if (!window.pdfjsLib) throw new Error('No se pudo cargar el lector de PDF.');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJSW_URL;
+}
+
+// ── PDF → texto ──────────────────────────────────────────────────
+//  pdf.js entrega fragmentos sueltos con su posición. Se agrupan por altura y
+//  se ordenan por x para rearmar las filas: en el reporte del SAS cada
+//  comprobante ocupa TRES bandas (fecha arriba, fila principal, hora abajo).
+async function _rcPdfATexto(buffer) {
+  const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
+  let salida = '';
+  for (let p = 1; p <= doc.numPages; p++) {
+    const contenido = await (await doc.getPage(p)).getTextContent();
+    const bandas = new Map();
+    contenido.items.forEach(it => {
+      if (!it.str || !it.str.trim()) return;
+      const y = Math.round(it.transform[5] * 2) / 2;
+      if (!bandas.has(y)) bandas.set(y, []);
+      bandas.get(y).push({ x: it.transform[4], s: it.str.trim() });
+    });
+    [...bandas.entries()]
+      .sort((a, b) => b[0] - a[0])                  // en PDF la y crece hacia arriba
+      .forEach(([, celdas]) => {
+        salida += celdas.sort((a, b) => a.x - b.x).map(c => c.s).join('\t') + '\n';
+      });
+  }
+  return salida;
+}
 
 function _rcFechaCaja() {
   if (state.aperturaFecha) {
@@ -2709,6 +2769,11 @@ async function openReporteCaja() {
     picker.value = _rcFechaCaja();
   }
   _rcSetMsg('Haz clic en <b>&#9658; Iniciar Reporte</b> para obtener los datos de TROEFAE.', false);
+  const zona = document.getElementById('rcZona');
+  if (zona) zona.style.display = 'none';
+  const res = document.getElementById('rcResultado');
+  if (res) res.innerHTML = '';
+  _rcWireCarga();
   _rcRenderAperturasEmp();
   _rcRenderRegistros();
   _rcActualizarBadge();
@@ -2784,6 +2849,29 @@ function _rcFechaDeUpdatedAt(updatedAt) {
 
 let _rcAperturasEmpActual = 0;
 
+// Hora de Lima en HH:MM:SS a partir de un ISO. Usa el mismo criterio que
+// _turnoDe (hourCycle h23) y NO la hora local del navegador, que puede diferir.
+function _rcHoraPE(iso) {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).format(new Date(iso));
+  } catch (e) { return null; }
+}
+
+// Justificaciones del día en la forma que espera Cuadre.cuadrar()
+function _rcJustificaciones(diaLista) {
+  const lista = (diaLista === null || diaLista === undefined)
+    ? (state.aperturasCaja || [])
+    : diaLista;
+  return lista.map(a => ({
+    hora:   a.hora || _rcHoraPE(a.fecha),
+    motivo: a.motivo || '(sin motivo)',
+    tipo:   a.tipo || '',
+    turno:  a.turno || ''
+  })).filter(j => j.hora);
+}
+
 async function _rcMostrarDatos(data, fecha, btn) {
   const cajaTimes   = Array.isArray(data.times) ? data.times : [];
   _rcCajaTimes      = cajaTimes;
@@ -2793,10 +2881,12 @@ async function _rcMostrarDatos(data, fecha, btn) {
   const diaLista     = await _aperturasDiaFetch(fecha);
   const aperturasEmp = diaLista === null ? (state.aperturasCaja || []).length : diaLista.length;
   _rcAperturasEmpActual = aperturasEmp;
+  _rcJustDia            = _rcJustificaciones(diaLista);
 
   if (aperturasBat === 0) {
     _rcSetMsg(`Sin aperturas registradas en TROEFAE para el ${fecha}.`, false);
     document.getElementById('rcFormComprobantes').style.display = 'none';
+    document.getElementById('rcZona').style.display = 'none';
     btn.disabled = false;
     return;
   }
@@ -2805,8 +2895,10 @@ async function _rcMostrarDatos(data, fecha, btn) {
   const horaStr    = updatedAt
     ? updatedAt.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
     : '';
+  const orden = cajaTimes.slice().sort();
   _rcSetMsg(
-    `✔ ${aperturasBat} apertura(s) de TROEFAE${horaStr ? ' (' + horaStr + ')' : ''}. Ingresa los comprobantes abajo.`,
+    `✔ <b>${aperturasBat} apertura(s)</b> de TROEFAE${horaStr ? ' (' + horaStr + ')' : ''}, ` +
+    `de ${escHtml(orden[0])} a ${escHtml(orden[orden.length - 1])}. Ahora cargá el reporte de ventas del SAS.`,
     false
   );
   const info = document.getElementById('rcAperturasInfo');
@@ -2815,9 +2907,19 @@ async function _rcMostrarDatos(data, fecha, btn) {
       `Total aperturas (TROEFAE): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
       `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
   }
-  document.getElementById('rcFormComprobantes').style.display = '';
-  const input = document.getElementById('rcInputComprobantes');
-  if (input) { input.value = ''; input.focus(); }
+  // Se despliega el selector DENTRO de la tarjeta y no como ventana del
+  // explorador: el diálogo nativo es modal y mientras está abierto el navegador
+  // no deja arrastrar ni pegar. Así funcionan las tres vías.
+  document.getElementById('rcFormComprobantes').style.display = 'none';
+  const zona = document.getElementById('rcZona');
+  const caja = document.getElementById('rcZonaCaja');
+  if (zona && caja) {
+    document.getElementById('rcArchivoSAS').value = '';
+    zona.style.display = '';
+    caja.classList.add('esperando');
+    caja.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => caja.classList.remove('esperando'), 4600);
+  }
   btn.disabled = false;
 }
 
@@ -2864,6 +2966,167 @@ async function iniciarReporteCaja() {
     clearTimeout(timeout);
     if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
     _rcMostrarDatos(data, fecha, btn);
+  });
+}
+
+// ── Carga del reporte del SAS y cuadre por horas ─────────────────
+function rcMostrarFormComprobantes() {
+  document.getElementById('rcZona').style.display = 'none';
+  const form = document.getElementById('rcFormComprobantes');
+  form.style.display = '';
+  const input = document.getElementById('rcInputComprobantes');
+  if (input) { input.value = ''; input.focus(); }
+}
+
+async function rcCargarReporteSAS(file) {
+  if (!file) return;
+  if (!window.Cuadre) { _rcSetMsg('⚠ Falta cuadre.js. Recargá la página.', false); return; }
+  _rcSetMsg('Leyendo ' + escHtml(file.name) + '…', true);
+  try {
+    const esPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+    let texto;
+    if (esPdf) {
+      await _rcAsegurarPdfJs();
+      texto = await _rcPdfATexto(await file.arrayBuffer());
+    } else {
+      texto = await file.text();
+    }
+    _rcProcesarTextoSAS(texto, file.name);
+  } catch (err) {
+    console.error('RC cargar reporte:', err);
+    _rcSetMsg('⚠ No pude leer el archivo: ' + escHtml(err.message) +
+              ' — probá con <b>✏ Manual</b> o ingresá la cantidad a mano.', false);
+  }
+}
+
+function _rcProcesarTextoSAS(texto, origen) {
+  const parsed = Cuadre.parsearComprobantes(texto);
+  _rcCompsSAS  = parsed.comprobantes;
+  if (!_rcCompsSAS.length) {
+    _rcSetMsg(`⚠ No reconocí comprobantes en ${escHtml(origen)}. ¿Es el reporte de ventas del SAS? ` +
+              'Si el reporte no trae hora de emisión, usá la carga manual.', false);
+    return;
+  }
+  document.getElementById('rcZona').style.display = 'none';
+
+  const r = Cuadre.cuadrar({
+    aperturas:       _rcCajaTimes.map(h => ({ hora: h })),
+    comprobantes:    _rcCompsSAS,
+    justificaciones: _rcJustDia
+  });
+  _rcCuadre = r;
+
+  _rcSetMsg(
+    `${r.totales.aperturas} aperturas de TROEFAE · ${r.totales.comprobantes} comprobantes · ` +
+    `${r.totales.justificaciones} justificadas por el empleado`, false);
+
+  state.rcRegistros = Array.isArray(state.rcRegistros) ? state.rcRegistros : [];
+  state.rcRegistros.push({
+    aperturasBat:  r.totales.aperturas,
+    aperturasEmp:  r.totales.justificaciones,
+    comprobantes:  r.totales.comprobantes,
+    anomalias:     r.aperturasSinJustificar.length,
+    anomaliasHoras: r.aperturasSinJustificar.map(a => a.hora),
+    compSinApertura: r.comprobantesSinApertura.map(c => c.hora),
+    justSinApertura: r.justificacionesSinApertura.map(j => j.hora),
+    fecha: new Date().toISOString()
+  });
+  saveStateNow();
+  _rcRenderRegistros();
+  _rcActualizarBadge();
+  _rcRenderAnomalias(r);
+}
+
+function _rcRenderAnomalias(r) {
+  const cont = document.getElementById('rcResultado');
+  if (!cont) return;
+  const huerfanas = r.aperturasSinJustificar;
+  const extras = [];
+  if (r.comprobantesSinApertura.length) {
+    extras.push(`${r.comprobantesSinApertura.length} comprobante(s) emitido(s) sin impresión: ` +
+      r.comprobantesSinApertura.map(c => escHtml(c.hora)).join(', '));
+  }
+  if (r.justificacionesSinApertura.length) {
+    extras.push(`${r.justificacionesSinApertura.length} motivo(s) del empleado sin apertura real: ` +
+      r.justificacionesSinApertura.map(j => escHtml(j.hora) + ' · ' + escHtml(j.motivo)).join(', '));
+  }
+
+  if (!huerfanas.length && !extras.length) {
+    cont.innerHTML = `<div class="rc-ok">✔ Sin anomalías — las ${r.totales.aperturas} aperturas están justificadas.</div>`;
+    return;
+  }
+
+  let h = '<div class="rc-anom">';
+  if (huerfanas.length) {
+    h += `<h4>⚠ ${huerfanas.length} apertura${huerfanas.length > 1 ? 's' : ''} sin justificar</h4>`;
+    h += huerfanas.map(a => `<div class="rc-anom-fila">
+        <span class="rc-anom-hora">${escHtml(a.hora)}</span>
+        <span class="rc-anom-nota">${a.posibleReimpresion
+          ? 'posible reimpresión de ' + escHtml(a.posibleReimpresion.doc) + ' (+' + a.posibleReimpresion.desfase + 's)'
+          : ''}</span>
+      </div>`).join('');
+  } else {
+    h += '<h4>⚠ Revisar</h4>';
+  }
+  if (extras.length) h += '<div class="rc-anom-extra">' + extras.join('<br>') + '</div>';
+  h += '</div>';
+  cont.innerHTML = h;
+}
+
+// ── Cableado de la carga: arrastrar · pegar · buscar ─────────────
+//  Se engancha UNA sola vez. Todos los manejadores salen temprano si la zona
+//  no está visible, para no interferir con el resto de la app (por ejemplo el
+//  pegado de Yapes en su textarea).
+let _rcWired = false;
+function _rcWireCarga() {
+  if (_rcWired) return;
+  const input = document.getElementById('rcArchivoSAS');
+  const caja  = document.getElementById('rcZonaCaja');
+  if (!input || !caja) return;                 // vista no presente: no engancha
+  _rcWired = true;
+
+  const zonaVisible = () => {
+    const z = document.getElementById('rcZona');
+    return z && z.style.display !== 'none' && z.offsetParent !== null;
+  };
+  const enCampo = t => {
+    const tag = (t && t.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+           (t && t.isContentEditable);
+  };
+
+  caja.addEventListener('click', () => { input.value = ''; input.click(); });
+  input.addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) rcCargarReporteSAS(f);
+  });
+
+  ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => {
+    if (!zonaVisible()) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    caja.classList.add('sobre');
+  }));
+  document.addEventListener('dragleave', e => {
+    if (!e.relatedTarget) caja.classList.remove('sobre');   // salió de la ventana
+  });
+  document.addEventListener('drop', e => {
+    if (!zonaVisible()) return;
+    e.preventDefault();
+    caja.classList.remove('sobre');
+    const f = e.dataTransfer && e.dataTransfer.files[0];
+    if (f) rcCargarReporteSAS(f);
+  });
+
+  document.addEventListener('paste', e => {
+    if (!zonaVisible() || enCampo(e.target)) return;
+    const f = e.clipboardData && e.clipboardData.files && e.clipboardData.files[0];
+    if (f) { e.preventDefault(); rcCargarReporteSAS(f); return; }
+    const t = e.clipboardData && e.clipboardData.getData('text');
+    if (t && t.trim().length > 40) {            // pegaron el texto del reporte
+      e.preventDefault();
+      _rcProcesarTextoSAS(t, 'el texto pegado');
+    }
   });
 }
 
@@ -2960,11 +3223,17 @@ function _rcRenderRegistros() {
         const comp     = r.comprobantes ?? 0;
         const esperado = comp + emp;
         const diff     = bat - esperado;
-        const color    = diff === 0 ? '#15803d' : '#c2410c';
-        const icon     = diff === 0 ? '✔' : '⚠';
-        const estado   = diff === 0
-          ? 'Cuadra'
-          : diff > 0 ? `Faltan ${diff}` : `Sobran ${Math.abs(diff)}`;
+        // Con horas manda el nº de anomalías; sin ellas (manual o registros
+        // viejos), la resta de siempre.
+        const porHora  = r.anomalias !== undefined && r.anomalias !== null;
+        const mal      = porHora ? r.anomalias > 0 : diff !== 0;
+        const color    = mal ? '#c2410c' : '#15803d';
+        const icon     = mal ? '⚠' : '✔';
+        const estado   = porHora
+          ? (r.anomalias === 0 ? 'Sin anomalías'
+             : `${r.anomalias} sin justificar${r.anomaliasHoras?.length ? ' (' + r.anomaliasHoras.join(', ') + ')' : ''}`)
+          : (diff === 0 ? 'Cuadra'
+             : diff > 0 ? `Faltan ${diff}` : `Sobran ${Math.abs(diff)}`);
         return `<div style="padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
           <div style="display:flex;justify-content:space-between;align-items:flex-start">
             <div>
@@ -2977,8 +3246,10 @@ function _rcRenderRegistros() {
                      font-size:15px;padding:0 4px;line-height:1" title="Eliminar">✕</button>
           </div>
           <div style="color:#374151;font-size:12px;margin-top:3px">
-            Bat: <b>${bat}</b> = Comprobantes: <b>${comp}</b> + Empleado: <b>${emp}</b>
-            ${diff !== 0 ? `<span style="color:${color}"> (suma: ${esperado})</span>` : ''}
+            ${porHora
+              ? `Aperturas: <b>${bat}</b> · Comprobantes: <b>${comp}</b> · Empleado: <b>${emp}</b>`
+              : `Bat: <b>${bat}</b> = Comprobantes: <b>${comp}</b> + Empleado: <b>${emp}</b>` +
+                (diff !== 0 ? `<span style="color:${color}"> (suma: ${esperado})</span>` : '')}
           </div>
         </div>`;
       }).join('')}

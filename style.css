@@ -1405,3 +1405,32 @@ kbd {
   .btn-ghost { padding: 5px 7px; font-size: 11px; }
   .btn-outline-white { padding: 5px 9px; font-size: 11px; }
 }
+
+
+/* ── Reporte de Caja: carga del reporte SAS y anomalías ───────────── */
+.rc-zona {
+  border: 2px dashed #cbd2d8; border-radius: 8px; padding: 18px 14px;
+  text-align: center; background: #fcfcfd; cursor: pointer; transition: .13s;
+}
+.rc-zona:hover { border-color: #1a6b3c; background: #f6fbf8; }
+.rc-zona.sobre { border-color: #1a6b3c; background: #dcfce7; }
+.rc-enlace { color: #1d4ed8; text-decoration: underline; cursor: pointer; }
+@keyframes rcLatido {
+  0%   { box-shadow: 0 0 0 0 rgba(26,107,60,.34); }
+  70%  { box-shadow: 0 0 0 9px rgba(26,107,60,0); }
+  100% { box-shadow: 0 0 0 0 rgba(26,107,60,0); }
+}
+.rc-zona.esperando { border-color: #1a6b3c; animation: rcLatido 1.5s ease-out 3; }
+
+.rc-anom { background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 8px; padding: 12px 14px; }
+.rc-anom h4 { margin: 0 0 8px; font-size: 13px; color: #b91c1c; }
+.rc-anom-fila {
+  display: flex; justify-content: space-between; gap: 10px;
+  padding: 6px 0; border-bottom: 1px solid #fee2e2; font-size: 14px;
+}
+.rc-anom-fila:last-child { border-bottom: 0; }
+.rc-anom-hora { font-family: ui-monospace, Consolas, monospace; font-weight: 700; color: #7f1d1d; font-size: 16px; }
+.rc-anom-nota { font-size: 12px; color: #9a3412; text-align: right; }
+.rc-anom-extra { margin-top: 9px; padding-top: 9px; border-top: 1px solid #fecaca; font-size: 12px; color: #7f1d1d; }
+.rc-ok { background: #dcfce7; border: 1.5px solid #86efac; border-radius: 8px;
+         padding: 11px 14px; font-size: 14px; color: #166534; font-weight: 600; }
