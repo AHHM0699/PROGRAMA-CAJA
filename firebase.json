@@ -15,7 +15,8 @@
       "reporte_ventas.js",
       "lanzar-yapes.*",
       "setTopmost-yapes.*",
-      "crear-acceso-directo.ps1"
+      "crear-acceso-directo.ps1",
+      "servidor-android/**"
     ],
     "headers": [
       {

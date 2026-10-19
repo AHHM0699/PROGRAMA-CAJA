@@ -1,0 +1,6 @@
+config.json
+credencial-gmail.json
+node_modules/
+data/
+*.log
+*.err

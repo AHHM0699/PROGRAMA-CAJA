@@ -704,7 +704,19 @@ async function _buildAperturasReporte() {
   return dia.slice().sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
 }
 
-// ── Apertura de gaveta POS-D via protocolo cajaabierta:// ────
+// ── Apertura de gaveta POS-D ─────────────────────────────────
+// El servidor del Samsung (servidor-android/) escucha gavetaComandos y
+// manda el pulso a la impresora; funciona desde cualquier dispositivo.
+function _enviarOrdenGaveta(motivo) {
+  return db.collection('gavetaComandos').add({
+    motivo,
+    status:      'pending',
+    usuario:     auth.currentUser ? auth.currentUser.email : null,
+    cajaId:      currentCajaId || null,
+    requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
 function _registrarAperturaCaja({ motivo, tipo }) {
   const fecha = new Date().toISOString();
   const turno = _turnoDe(fecha);
@@ -738,12 +750,7 @@ async function abrirCajaPOS() {
   if (btn) btn.disabled = true;
 
   try {
-    const a = document.createElement('a');
-    a.href = 'cajaabierta://abrir';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    await _enviarOrdenGaveta(motivo);
 
     _registrarAperturaCaja({ motivo, tipo: 'fisica' });
 
@@ -790,14 +797,9 @@ function abrirGavetaCajaCerrada() {
   const btn = document.getElementById('btnAbrirCC');
   if (btn) btn.disabled = true;
 
-  try {
-    const a = document.createElement('a');
-    a.href = 'cajaabierta://abrir';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  } catch(e) {}
+  _enviarOrdenGaveta(motivo).catch(e => {
+    if (fb) fb.textContent = 'Error al abrir la gaveta: ' + e.message;
+  });
 
   if (currentCajaId) {
     _registrarAperturaCaja({ motivo, tipo: 'fisica-cerrada' });
@@ -873,14 +875,9 @@ function abrirCajaSinCajaActiva() {
   const btn = document.getElementById('btnAbrirSelectorCC');
   if (btn) btn.disabled = true;
 
-  try {
-    const a = document.createElement('a');
-    a.href = 'cajaabierta://abrir';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  } catch (_) {}
+  _enviarOrdenGaveta(motivo).catch(e => {
+    if (fb) fb.textContent = 'Error al abrir la caja: ' + e.message;
+  });
 
   _aperturasDiaPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString(), turno });
 

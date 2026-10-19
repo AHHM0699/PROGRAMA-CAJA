@@ -1,0 +1,2 @@
+# Corren en Android (bash/node): siempre con saltos de línea LF
+* text=auto eol=lf

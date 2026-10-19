@@ -1,0 +1,8 @@
+{
+  "projectId": "programa-caja",
+  "printerHost": "192.168.1.250",
+  "printerPort": 9100,
+  "listenHost": "0.0.0.0",
+  "listenPort": 9100,
+  "minBytesImpresion": 32
+}

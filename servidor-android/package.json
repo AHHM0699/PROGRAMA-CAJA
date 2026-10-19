@@ -1,0 +1,9 @@
+{
+  "name": "servidor-caja-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reemplazo de TROEFAE: proxy de impresión, sensor de gaveta y reporte de caja en Termux",
+  "main": "servidor.js",
+  "scripts": { "start": "node servidor.js" },
+  "dependencies": { "firebase-admin": "14.5.0" }
+}
