@@ -22,9 +22,10 @@
 // ════════════════════════════════════════════════════════════════════
 'use strict';
 
-const net  = require('net');
-const fs   = require('fs');
-const path = require('path');
+const net   = require('net');
+const fs    = require('fs');
+const path  = require('path');
+const dgram = require('dgram');
 
 const os    = require('os');
 const { initializeApp, getApps, applicationDefault } = require('firebase-admin/app');
@@ -75,6 +76,23 @@ function horaPE(d = new Date()) {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
   }).format(d);
+}
+
+// ── Aviso a la cámara (camara.js, proceso aparte) ──────────────────
+//  Datagrama UDP local sin esperar respuesta: si camara.js no está
+//  corriendo o falla, la caja no se entera.
+const PUERTO_CAMARA = (CONFIG.camara && CONFIG.camara.puertoAvisos) || 9199;
+let avisoCamara = null;
+function avisarCamara(ev) {
+  try {
+    if (!avisoCamara) {
+      avisoCamara = dgram.createSocket('udp4');
+      avisoCamara.on('error', () => {});
+      avisoCamara.unref();
+    }
+    avisoCamara.send(JSON.stringify({ ...ev, iso: new Date().toISOString() }),
+                     PUERTO_CAMARA, '127.0.0.1', () => {});
+  } catch (e) { /* nunca debe afectar a la caja */ }
 }
 
 // ── Registro local por día (respaldo sin red) ───────────────────────
@@ -231,6 +249,7 @@ function actualizarGaveta(abierta, fuente) {
     // Abierta mientras un trabajo pasa por el proxy: la causa es ese trabajo.
     causaApertura = trabajoActual || buscarCausa(aperturaDesde.getTime());
     log(`Gaveta ABIERTA (${fuente})`);
+    avisarCamara({ tipo: 'apertura', causa: causaApertura ? causaApertura.tipo : 'no-autorizada' });
     return;
   }
 
@@ -283,6 +302,7 @@ function procesarCola() {
   let previo = -1;            // último byte del chunk anterior (ESC p partido en dos)
   // La gaveta se abre MIENTRAS se imprime: la causa se anota al empezar
   trabajoActual = { tipo: 'impresion', origen, ts: Date.now() };
+  avisarCamara({ tipo: 'impresion', origen });
 
   const trabajo  = trabajoActual;
 
