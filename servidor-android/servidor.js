@@ -325,9 +325,9 @@ function procesarCola() {
     }
     if (bytes >= (CONFIG.minBytesImpresion || 32)) {
       let gaveta = traeGaveta ? 'propia' : 'no';
-      // Como con la PC de antes, cada impresión abre la gaveta aunque el
-      // RawBT de ese celular no tenga configurada la orden.
-      if (!traeGaveta && CONFIG.abrirGavetaEnCadaImpresion !== false && conectada) {
+      // Solo abre la gaveta quien tiene la orden (ESC p) configurada en su
+      // RawBT. abrirGavetaEnCadaImpresion: true la agrega a toda impresión.
+      if (!traeGaveta && CONFIG.abrirGavetaEnCadaImpresion === true && conectada) {
         anotarCausa({ tipo: 'impresion', origen });
         impresora.write(CMD_GAVETA);
         gaveta = 'agregada por el servidor';
