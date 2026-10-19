@@ -107,6 +107,8 @@ let clienteActivo = null;    // socket del trabajo en curso (recibe las respuest
 let buffer        = Buffer.alloc(0);
 let fallosSeguidos = 0;
 let recibioDatos   = false;   // la conexión actual ya recibió algo de la impresora
+let trabajoActual  = null;    // { tipo:'impresion', origen } mientras un trabajo pasa por el proxy
+let causaApertura  = null;    // causa fijada en el momento en que se abrió la gaveta
 
 function conectarImpresora() {
   impresora = net.createConnection({ host: PRINTER_HOST, port: PRINTER_PORT });
@@ -219,6 +221,8 @@ function actualizarGaveta(abierta, fuente) {
 
   if (abierta) {
     aperturaDesde = new Date();
+    // Abierta mientras un trabajo pasa por el proxy: la causa es ese trabajo
+    causaApertura = trabajoActual;
     log(`Gaveta ABIERTA (${fuente})`);
     return;
   }
@@ -227,7 +231,8 @@ function actualizarGaveta(abierta, fuente) {
   const desde = aperturaDesde || new Date();
   const hasta = new Date();
   aperturaDesde = null;
-  const causa = buscarCausa(desde.getTime());
+  const causa = causaApertura || buscarCausa(desde.getTime());
+  causaApertura = null;
   const entry = {
     hora:     horaPE(desde),
     iso:      desde.toISOString(),
@@ -265,17 +270,29 @@ function procesarCola() {
   trabajoEnCurso = true;
   clienteActivo  = cliente;
   const origen   = (cliente.remoteAddress || '').replace('::ffff:', '');
+  const inicio   = new Date();
   let bytes = 0;
+  let traeGaveta = false;     // el trabajo ya incluye ESC p
+  let previo = -1;            // último byte del chunk anterior (ESC p partido en dos)
+  // La gaveta se abre MIENTRAS se imprime: la causa se anota al empezar
+  trabajoActual = { tipo: 'impresion', origen, ts: Date.now() };
 
   const terminar = () => {
     if (!trabajoEnCurso || clienteActivo !== cliente) return;
     clienteActivo  = null;
     trabajoEnCurso = false;
+    trabajoActual  = null;
     if (bytes >= (CONFIG.minBytesImpresion || 32)) {
-      const ahora = new Date();
-      anotar('impresiones', { hora: horaPE(ahora), iso: ahora.toISOString(), origen, bytes });
-      anotarCausa({ tipo: 'impresion', origen });
-      log(`Impresión de ${origen} (${bytes} bytes)`);
+      let gaveta = traeGaveta ? 'propia' : 'no';
+      // Como con la PC de antes, cada impresión abre la gaveta aunque el
+      // RawBT de ese celular no tenga configurada la orden.
+      if (!traeGaveta && CONFIG.abrirGavetaEnCadaImpresion !== false && conectada) {
+        anotarCausa({ tipo: 'impresion', origen });
+        impresora.write(CMD_GAVETA);
+        gaveta = 'agregada por el servidor';
+      }
+      anotar('impresiones', { hora: horaPE(inicio), iso: inicio.toISOString(), origen, bytes, gaveta });
+      log(`Impresión de ${origen} (${bytes} bytes) — orden de gaveta: ${gaveta}`);
     }
     // RawBT puede mandar ESC @ o desactivar el ASB: se vuelve a activar
     if (conectada) impresora.write(CMD_ASB_ON);
@@ -284,6 +301,13 @@ function procesarCola() {
 
   cliente.on('data', chunk => {
     bytes += chunk.length;
+    if (!traeGaveta) {
+      if (previo === 0x1b && chunk[0] === 0x70) traeGaveta = true;
+      for (let i = 0; i < chunk.length - 1 && !traeGaveta; i++) {
+        if (chunk[i] === 0x1b && chunk[i + 1] === 0x70) traeGaveta = true;
+      }
+      previo = chunk[chunk.length - 1];
+    }
     try { enviarAImpresora(chunk); }
     catch (e) { log('Trabajo perdido:', e.message); cliente.destroy(); }
   });

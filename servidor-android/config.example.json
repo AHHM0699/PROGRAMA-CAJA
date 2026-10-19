@@ -4,5 +4,6 @@
   "printerPort": 9100,
   "listenHost": "0.0.0.0",
   "listenPort": 9100,
-  "minBytesImpresion": 32
+  "minBytesImpresion": 32,
+  "abrirGavetaEnCadaImpresion": true
 }
