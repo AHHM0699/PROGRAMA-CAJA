@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════════════
 //  CUADRE DE APERTURAS  —  motor aislado (Node + navegador)
-//  Empareja: aperturas TROEFAE (impresiones) <-> comprobantes SAS
+//  Empareja: aperturas SERVIDOR A37 CP (gaveta) <-> comprobantes SAS
 //            + justificaciones del empleado
 //  NO depende del DOM ni de Firebase. Es el archivo que luego se
 //  copiaria a app.js si las pruebas convencen.

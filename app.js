@@ -2765,7 +2765,7 @@ async function openReporteCaja() {
     picker.max   = hoy;
     picker.value = _rcFechaCaja();
   }
-  _rcSetMsg('Haz clic en <b>&#9658; Iniciar Reporte</b> para obtener los datos de TROEFAE.', false);
+  _rcSetMsg('Haz clic en <b>&#9658; Iniciar Reporte</b> para obtener los datos de SERVIDOR A37 CP.', false);
   const zona = document.getElementById('rcZona');
   if (zona) zona.style.display = 'none';
   const res = document.getElementById('rcResultado');
@@ -2828,10 +2828,6 @@ function _rcRenderAperturasEmp() {
 function _rcSetMsg(html, spinner) {
   document.getElementById('rcMensaje').innerHTML = html;
   document.getElementById('rcSpinner').style.display = spinner ? '' : 'none';
-  // Copia junto a la zona de carga: en el celular rcMensaje queda fuera de pantalla
-  const espejo = document.getElementById('rcPegarMsg');
-  const zona   = document.getElementById('rcZona');
-  if (espejo) espejo.innerHTML = zona && zona.style.display !== 'none' ? html : '';
 }
 
 let _rcUnsubscribe = null;
@@ -2878,14 +2874,14 @@ async function _rcMostrarDatos(data, fecha, btn) {
   _rcCajaTimes      = cajaTimes;
   const aperturasBat = cajaTimes.length;
   // Aperturas del DÍA consultado (no solo la sesión actual), para que cuadre
-  // con TROEFAE aunque haya habido una caja Mañana y otra Tarde ese día.
+  // con SERVIDOR A37 CP aunque haya habido una caja Mañana y otra Tarde ese día.
   const diaLista     = await _aperturasDiaFetch(fecha);
   const aperturasEmp = diaLista === null ? (state.aperturasCaja || []).length : diaLista.length;
   _rcAperturasEmpActual = aperturasEmp;
   _rcJustDia            = _rcJustificaciones(diaLista);
 
   if (aperturasBat === 0) {
-    _rcSetMsg(`Sin aperturas registradas en TROEFAE para el ${fecha}.`, false);
+    _rcSetMsg(`Sin aperturas registradas en SERVIDOR A37 CP para el ${fecha}.`, false);
     document.getElementById('rcFormComprobantes').style.display = 'none';
     document.getElementById('rcZona').style.display = 'none';
     btn.disabled = false;
@@ -2898,14 +2894,14 @@ async function _rcMostrarDatos(data, fecha, btn) {
     : '';
   const orden = cajaTimes.slice().sort();
   _rcSetMsg(
-    `✔ <b>${aperturasBat} apertura(s)</b> de TROEFAE${horaStr ? ' (' + horaStr + ')' : ''}, ` +
+    `✔ <b>${aperturasBat} apertura(s)</b> de SERVIDOR A37 CP${horaStr ? ' (' + horaStr + ')' : ''}, ` +
     `de ${escHtml(orden[0])} a ${escHtml(orden[orden.length - 1])}. Ahora cargá el reporte de ventas del SAS.`,
     false
   );
   const info = document.getElementById('rcAperturasInfo');
   if (info) {
     info.innerHTML =
-      `Total aperturas (TROEFAE): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
+      `Total aperturas (SERVIDOR A37 CP): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
       `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
   }
   // Se despliega el selector DENTRO de la tarjeta y no como ventana del
@@ -2932,7 +2928,7 @@ async function iniciarReporteCaja() {
   const picker = document.getElementById('rcFechaPicker');
   const fecha  = picker?.value || _todayPE();
 
-  _rcSetMsg('Enviando solicitud a TROEFAE…', true);
+  _rcSetMsg('Enviando solicitud a SERVIDOR A37 CP…', true);
 
   // Registrar momento exacto antes de enviar — solo aceptar respuestas posteriores
   const enviadoEn = new Date();
@@ -2949,11 +2945,11 @@ async function iniciarReporteCaja() {
     return;
   }
 
-  _rcSetMsg('Esperando respuesta de TROEFAE…', true);
+  _rcSetMsg('Esperando respuesta de SERVIDOR A37 CP…', true);
 
   const timeout = setTimeout(() => {
     if (_rcUnsubscribe) { _rcUnsubscribe(); _rcUnsubscribe = null; }
-    _rcSetMsg('TROEFAE no respondió. Verifica que esté encendida y con el watcher activo.', false);
+    _rcSetMsg('SERVIDOR A37 CP no respondió. Verifica que el celular esté encendido, con WiFi y con Termux abierto.', false);
     btn.disabled = false;
   }, 30000);
 
@@ -3000,41 +2996,6 @@ async function rcCargarReporteSAS(file) {
   }
 }
 
-// Botón "📋 Pegar": en el celular no hay Ctrl+V. La API del portapapeles no
-// entrega PDFs (ni en Android ni en iPhone), solo texto: se lee la tabla del
-// reporte copiada del SAS. El PDF copiado se pega en el recuadro de al lado.
-async function rcPegarDelPortapapeles() {
-  const recuadro = document.getElementById('rcPegarTexto');
-  _rcSetMsg('Leyendo el portapapeles…', true);
-  let tiposVistos = [];
-  // Primero un PDF (Safari puede entregarlo tras su burbuja "Pegar")
-  try {
-    if (navigator.clipboard && navigator.clipboard.read) {
-      for (const item of await navigator.clipboard.read()) {
-        tiposVistos = tiposVistos.concat(item.types);
-        const tipo = item.types.find(t => /pdf/i.test(t));
-        if (tipo) {
-          const blob = await item.getType(tipo);
-          rcCargarReporteSAS(new File([blob], 'reporte-sas.pdf', { type: 'application/pdf' }));
-          return;
-        }
-      }
-    }
-  } catch (e) { /* sin read() o sin PDF: se prueba con texto */ }
-  try {
-    const t = await navigator.clipboard.readText();
-    if (t && t.trim().length > 40) { _rcProcesarTextoSAS(t, 'el texto pegado'); return; }
-    _rcSetMsg('⚠ El portapapeles no tiene el reporte (tenía: <b>' + escHtml(tiposVistos.join(', ') || 'nada') +
-              '</b>). Tocá el recuadro 📄 para elegir el PDF.', false);
-  } catch (e) {
-    // Sin permiso o navegador sin la API: queda el "Pegar" nativo del recuadro
-    _rcSetMsg('⚠ El navegador no dejó leer el portapapeles (' + escHtml(e.name || e.message) +
-              (tiposVistos.length ? '; tenía: ' + escHtml(tiposVistos.join(', ')) : '') +
-              '). Mantené presionado el recuadro de al lado del botón y tocá <b>Pegar</b>.', false);
-    if (recuadro) recuadro.focus();
-  }
-}
-
 function _rcProcesarTextoSAS(texto, origen) {
   const parsed = Cuadre.parsearComprobantes(texto);
   _rcCompsSAS  = parsed.comprobantes;
@@ -3053,7 +3014,7 @@ function _rcProcesarTextoSAS(texto, origen) {
   _rcCuadre = r;
 
   _rcSetMsg(
-    `${r.totales.aperturas} aperturas de TROEFAE · ${r.totales.comprobantes} comprobantes · ` +
+    `${r.totales.aperturas} aperturas de SERVIDOR A37 CP · ${r.totales.comprobantes} comprobantes · ` +
     `${r.totales.justificaciones} justificadas por el empleado`, false);
 
   state.rcRegistros = Array.isArray(state.rcRegistros) ? state.rcRegistros : [];
@@ -3089,7 +3050,6 @@ function _rcRenderAnomalias(r) {
 
   if (!huerfanas.length && !extras.length) {
     cont.innerHTML = `<div class="rc-ok">✔ Sin anomalías — las ${r.totales.aperturas} aperturas están justificadas.</div>`;
-    cont.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
@@ -3108,7 +3068,6 @@ function _rcRenderAnomalias(r) {
   if (extras.length) h += '<div class="rc-anom-extra">' + extras.join('<br>') + '</div>';
   h += '</div>';
   cont.innerHTML = h;
-  cont.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ── Cableado de la carga: arrastrar · pegar · buscar ─────────────
@@ -3134,36 +3093,6 @@ function _rcWireCarga() {
   };
 
   caja.addEventListener('click', () => { input.value = ''; input.click(); });
-
-  // Recuadro de pegado: recibe el "Pegar" del menú del celular (Android o
-  // iPhone). Si lo pegado es un archivo (PDF copiado en Archivos), se lee.
-  const recuadro = document.getElementById('rcPegarTexto');
-  //  Es un contenteditable: se intercepta el paste y nunca se deja que el
-  //  navegador inserte nada adentro.
-  if (recuadro) recuadro.addEventListener('paste', e => {
-    e.preventDefault();
-    recuadro.textContent = '';
-    recuadro.blur();
-    const cd = e.clipboardData;
-    if (!cd) { _rcSetMsg('⚠ El navegador no entregó lo pegado. Tocá el recuadro 📄 para elegir el PDF.', false); return; }
-    let f = cd.files && cd.files[0];
-    if (!f && cd.items) {
-      for (const it of cd.items) { if (it.kind === 'file') { f = it.getAsFile(); if (f) break; } }
-    }
-    if (f) { rcCargarReporteSAS(f); return; }
-    const t = cd.getData('text/plain') || cd.getData('text');
-    if (t && t.trim().length > 40) { _rcProcesarTextoSAS(t, 'el texto pegado'); return; }
-    // Diagnóstico: qué entregó el celular, para poder soportarlo
-    const tipos = [...(cd.types || [])].join(', ') || 'nada';
-    _rcSetMsg('⚠ No reconocí lo pegado (el celular entregó: <b>' + escHtml(tipos) + '</b>). ' +
-              'Tocá el recuadro 📄 para elegir el PDF.', false);
-  });
-  // Por si el navegador inserta algo igual (p. ej. arrastrar adentro)
-  if (recuadro) recuadro.addEventListener('input', () => {
-    const t = recuadro.textContent;
-    recuadro.textContent = '';
-    if (t.trim().length > 40) _rcProcesarTextoSAS(t, 'el texto pegado');
-  });
   input.addEventListener('change', e => {
     const f = e.target.files && e.target.files[0];
     if (f) rcCargarReporteSAS(f);
