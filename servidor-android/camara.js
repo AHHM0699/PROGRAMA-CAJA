@@ -177,7 +177,16 @@ function revisarClip(ahora) {
   for (let j = 0; j < gops.length; j++) if (gops[j].t <= c.inicio) k = j;
   const elegidos = gops.slice(k);
   if (!elegidos.length || !pat || !pmt) { log(`Sin video para ${describir(c.eventos[0])}, se descarta`); return; }
-  const ts = Buffer.concat([pat, pmt, ...elegidos.flatMap(g => g.partes)]);
+  // Cada flujo (audio incluido) empieza en un paquete completo: un paquete
+  // de audio cortado a la mitad hace fallar el paso a MP4
+  const iniciados = new Set();
+  const paquetes = elegidos.flatMap(g => g.partes).filter(p => {
+    const pid = ((p[1] & 0x1f) << 8) | p[2];
+    if (!iniciados.has(pid) && !(p[1] & 0x40)) return false;
+    iniciados.add(pid);
+    return true;
+  });
+  const ts = Buffer.concat([pat, pmt, ...paquetes]);
   const segundos = Math.round((ahora - elegidos[0].t) / 1000);
   aMP4(ts)
     .then(mp4 => encolar(c, mp4, 'mp4', segundos))
@@ -189,15 +198,16 @@ function revisarClip(ahora) {
 function aMP4(ts) {
   return new Promise((resolve, reject) => {
     const p = spawn('ffmpeg', [
-      '-hide_banner', '-loglevel', 'error', '-f', 'mpegts', '-i', 'pipe:0',
-      '-c', 'copy', '-tag:v', 'hvc1',
+      '-hide_banner', '-loglevel', 'error', '-fflags', '+genpts+discardcorrupt',
+      '-f', 'mpegts', '-i', 'pipe:0',
+      '-c', 'copy', '-tag:v', 'hvc1', '-bsf:a', 'aac_adtstoasc', '-avoid_negative_ts', 'make_zero',
       '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1'
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
     prioridadBaja(p);
     const partes = [];
     let errores = '';
     p.stdout.on('data', d => partes.push(d));
-    p.stderr.on('data', d => { errores = (errores + d).slice(-300); });
+    p.stderr.on('data', d => { if (errores.length < 600) errores += d; });
     p.on('error', reject);
     p.stdin.on('error', () => {});
     p.on('close', code => {
