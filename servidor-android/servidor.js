@@ -213,7 +213,12 @@ function actualizarGaveta(abierta, fuente) {
   if (gavetaAbierta === null) {             // primer dato tras conectar
     gavetaAbierta = abierta;
     log(`Gaveta ${abierta ? 'ABIERTA' : 'cerrada'} (estado inicial)`);
-    if (abierta) aperturaDesde = new Date();
+    if (abierta) {
+      aperturaDesde = new Date();
+      // No se vio abrirse: no se puede saber la causa (suele ser un
+      // artefacto de la reconexión); no se marca como no autorizada.
+      causaApertura = { tipo: 'reconexion' };
+    }
     return;
   }
   if (abierta === gavetaAbierta) return;
@@ -221,8 +226,10 @@ function actualizarGaveta(abierta, fuente) {
 
   if (abierta) {
     aperturaDesde = new Date();
-    // Abierta mientras un trabajo pasa por el proxy: la causa es ese trabajo
-    causaApertura = trabajoActual;
+    // La causa se decide AL ABRIR: si se espera al cierre, una gaveta que
+    // quedó abierta varios minutos ya no encuentra su orden.
+    // Abierta mientras un trabajo pasa por el proxy: la causa es ese trabajo.
+    causaApertura = trabajoActual || buscarCausa(aperturaDesde.getTime());
     log(`Gaveta ABIERTA (${fuente})`);
     return;
   }
@@ -231,7 +238,7 @@ function actualizarGaveta(abierta, fuente) {
   const desde = aperturaDesde || new Date();
   const hasta = new Date();
   aperturaDesde = null;
-  const causa = causaApertura || buscarCausa(desde.getTime());
+  const causa = causaApertura;
   causaApertura = null;
   const entry = {
     hora:     horaPE(desde),
@@ -277,11 +284,20 @@ function procesarCola() {
   // La gaveta se abre MIENTRAS se imprime: la causa se anota al empezar
   trabajoActual = { tipo: 'impresion', origen, ts: Date.now() };
 
+  const trabajo  = trabajoActual;
+
   const terminar = () => {
     if (!trabajoEnCurso || clienteActivo !== cliente) return;
     clienteActivo  = null;
     trabajoEnCurso = false;
     trabajoActual  = null;
+    // Solo la orden de gaveta, sin nada impreso (p. ej. el botón "abrir
+    // cajón" de RawBT): se abrió la caja sin comprobante.
+    if (bytes < (CONFIG.minBytesImpresion || 32) && traeGaveta) {
+      trabajo.tipo = 'gaveta-directa';
+      anotar('impresiones', { hora: horaPE(inicio), iso: inicio.toISOString(), origen, bytes, gaveta: 'directa sin impresion' });
+      log(`Orden de gaveta DIRECTA desde ${origen} sin imprimir nada`);
+    }
     if (bytes >= (CONFIG.minBytesImpresion || 32)) {
       let gaveta = traeGaveta ? 'propia' : 'no';
       // Como con la PC de antes, cada impresión abre la gaveta aunque el
@@ -409,7 +425,8 @@ async function timesDelDia(fecha) {
     const snap = await db.doc(`aperturasFisicas/${fecha}`).get().catch(() => null);
     if (snap && snap.exists) lista = snap.data().lista || [];
   }
-  return lista.map(e => e.hora).sort();
+  // Las "reconexion" no se vieron abrirse: no cuentan como apertura
+  return lista.filter(e => e.causa !== 'reconexion').map(e => e.hora).sort();
 }
 
 function escucharReporte() {
