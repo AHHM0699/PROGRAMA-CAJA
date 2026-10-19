@@ -5,3 +5,5 @@ data/
 *.log
 *.err
 drive-token.json
+alertas/node_modules/
+alertas/whatsapp-sesion/

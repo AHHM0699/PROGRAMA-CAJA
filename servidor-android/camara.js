@@ -309,6 +309,20 @@ async function subir(v, datos) {
     method: 'PUT', headers: { 'Content-Type': tipo }, body: datos
   });
   if (!r.ok) throw new Error(`Drive subida ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  // Ya subido: un fallo al leer la respuesta no debe repetir la subida
+  const { id } = await r.json().catch(() => ({}));
+  avisarVideo(v, id);
+}
+
+// Video de una apertura que no fue impresión: alertas.js manda el enlace
+const PUERTO_ALERTAS = (CONFIG.alertas && CONFIG.alertas.puertoAvisos) || 9198;
+const avisos = dgram.createSocket('udp4');
+avisos.on('error', () => {});
+function avisarVideo(v, id) {
+  if (!v.alerta || !id) return;
+  const url = `https://drive.google.com/file/d/${id}/view`;
+  try { avisos.send(JSON.stringify({ tipo: 'video', hora: v.hora, url }), PUERTO_ALERTAS, '127.0.0.1', () => {}); }
+  catch (e) { /* las alertas son opcionales */ }
 }
 
 // ── Subida: directa desde RAM; si falla, espera en el celular ────────
@@ -317,9 +331,11 @@ let subiendo = false;
 
 function encolar(c, datos, ext, segundos) {
   const d = new Date(c.eventos[0].t);
+  const nombres = etiquetas(c.eventos);
   enRam.push({ v: {
-    fecha: fechaPE(d), ext, segundos,
-    nombre: `${horaPE(d).replace(/:/g, '-')} ${etiquetas(c.eventos)}.${ext}`,
+    fecha: fechaPE(d), ext, segundos, hora: horaPE(d),
+    alerta: nombres.includes('apertura'),
+    nombre: `${horaPE(d).replace(/:/g, '-')} ${nombres}.${ext}`,
     descripcion: c.eventos.map(e => `${horaPE(new Date(e.t))} ${describir(e)}`).join('\n')
   }, datos });
   procesarSubidas();

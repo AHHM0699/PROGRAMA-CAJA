@@ -78,10 +78,13 @@ function horaPE(d = new Date()) {
   }).format(d);
 }
 
-// ── Aviso a la cámara (camara.js, proceso aparte) ──────────────────
-//  Datagrama UDP local sin esperar respuesta: si camara.js no está
-//  corriendo o falla, la caja no se entera.
-const PUERTO_CAMARA = (CONFIG.camara && CONFIG.camara.puertoAvisos) || 9199;
+// ── Aviso a la cámara y a las alertas (camara.js, alertas.js) ──────
+//  Datagrama UDP local sin esperar respuesta: si esos procesos no están
+//  corriendo o fallan, la caja no se entera.
+const PUERTOS_AVISO = [
+  (CONFIG.camara  && CONFIG.camara.puertoAvisos)  || 9199,
+  (CONFIG.alertas && CONFIG.alertas.puertoAvisos) || 9198,
+];
 let avisoCamara = null;
 function avisarCamara(ev) {
   try {
@@ -90,8 +93,8 @@ function avisarCamara(ev) {
       avisoCamara.on('error', () => {});
       avisoCamara.unref();
     }
-    avisoCamara.send(JSON.stringify({ ...ev, iso: new Date().toISOString() }),
-                     PUERTO_CAMARA, '127.0.0.1', () => {});
+    const datos = JSON.stringify({ ...ev, iso: new Date().toISOString() });
+    for (const puerto of PUERTOS_AVISO) avisoCamara.send(datos, puerto, '127.0.0.1', () => {});
   } catch (e) { /* nunca debe afectar a la caja */ }
 }
 

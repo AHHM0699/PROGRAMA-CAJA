@@ -17,5 +17,8 @@
   "drive": {
     "clientId": "PEGAR_CLIENT_ID.apps.googleusercontent.com",
     "clientSecret": "PEGAR_CLIENT_SECRET"
+  },
+  "alertas": {
+    "whatsapp": "51XXXXXXXXX"
   }
 }
