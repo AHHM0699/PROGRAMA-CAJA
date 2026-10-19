@@ -1,5 +1,5 @@
 // Service Worker — Che plaS Control de Caja
-const CACHE = 'cheplas-v11';
+const CACHE = 'cheplas-v12';
 const BASE  = self.registration.scope;          // ej: https://ahhm0699.github.io/PROGRAMA-CAJA/
 const PRECACHE = [
   BASE,
@@ -37,9 +37,11 @@ self.addEventListener('fetch', e => {
     e.respondWith(fetch(e.request));
     return;
   }
-  // Resto: network-first (garantiza contenido fresco), cae a cache si sin red
+  // Resto: network-first (garantiza contenido fresco), cae a cache si sin red.
+  // cache:'no-cache' revalida con el servidor: sin esto el navegador entregaba
+  // su copia HTTP de hasta 1 h y una versión nueva tardaba en verse.
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' })
       .then(res => {
         const clone = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, clone));
