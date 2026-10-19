@@ -218,8 +218,26 @@ function aMP4(ts) {
   });
 }
 
+// Como el Samsung tiene la única conexión con la impresora, una apertura
+// sin impresión ni orden del celular solo puede ser con la llave (o a mano)
+function etiqueta(ev) {
+  if (ev.tipo === 'gaveta-directa' || ev.causa === 'boton') return 'apertura desde celular';
+  if (ev.causa === 'no-autorizada') return 'apertura con llave';
+  if (ev.tipo === 'impresion' || ev.causa === 'impresion') return 'impresion';
+  return ev.causa || ev.tipo;
+}
+
 function describir(ev) {
-  return [ev.tipo, ev.causa, ev.origen].filter(Boolean).join(' · ');
+  return [etiqueta(ev), ev.motivo, ev.origen].filter(Boolean).join(' · ');
+}
+
+// Un trabajo de RawBT que solo abrió la gaveta llega primero como
+// "impresión" y al terminar como "gaveta-directa": cuenta como celular
+function etiquetas(eventos) {
+  const directas = new Set(eventos.filter(e => e.tipo === 'gaveta-directa').map(e => e.origen));
+  return [...new Set(eventos
+    .filter(e => !(etiqueta(e) === 'impresion' && directas.has(e.origen)))
+    .map(etiqueta))].join(' + ');
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -299,10 +317,9 @@ let subiendo = false;
 
 function encolar(c, datos, ext, segundos) {
   const d = new Date(c.eventos[0].t);
-  const etiquetas = [...new Set(c.eventos.map(e => e.causa || e.tipo))].join('+');
   enRam.push({ v: {
     fecha: fechaPE(d), ext, segundos,
-    nombre: `${horaPE(d).replace(/:/g, '-')} ${etiquetas}.${ext}`,
+    nombre: `${horaPE(d).replace(/:/g, '-')} ${etiquetas(c.eventos)}.${ext}`,
     descripcion: c.eventos.map(e => `${horaPE(new Date(e.t))} ${describir(e)}`).join('\n')
   }, datos });
   procesarSubidas();

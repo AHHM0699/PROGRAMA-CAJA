@@ -249,7 +249,8 @@ function actualizarGaveta(abierta, fuente) {
     // Abierta mientras un trabajo pasa por el proxy: la causa es ese trabajo.
     causaApertura = trabajoActual || buscarCausa(aperturaDesde.getTime());
     log(`Gaveta ABIERTA (${fuente})`);
-    avisarCamara({ tipo: 'apertura', causa: causaApertura ? causaApertura.tipo : 'no-autorizada' });
+    avisarCamara({ tipo: 'apertura', causa: causaApertura ? causaApertura.tipo : 'no-autorizada',
+                   motivo: causaApertura && causaApertura.motivo, origen: causaApertura && causaApertura.origen });
     return;
   }
 
@@ -317,6 +318,7 @@ function procesarCola() {
       trabajo.tipo = 'gaveta-directa';
       anotar('impresiones', { hora: horaPE(inicio), iso: inicio.toISOString(), origen, bytes, gaveta: 'directa sin impresion' });
       log(`Orden de gaveta DIRECTA desde ${origen} sin imprimir nada`);
+      avisarCamara({ tipo: 'gaveta-directa', origen });
     }
     if (bytes >= (CONFIG.minBytesImpresion || 32)) {
       let gaveta = traeGaveta ? 'propia' : 'no';
