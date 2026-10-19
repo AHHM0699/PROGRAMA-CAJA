@@ -2828,10 +2828,6 @@ function _rcRenderAperturasEmp() {
 function _rcSetMsg(html, spinner) {
   document.getElementById('rcMensaje').innerHTML = html;
   document.getElementById('rcSpinner').style.display = spinner ? '' : 'none';
-  // Copia junto a la zona de carga: en el celular rcMensaje queda fuera de pantalla
-  const espejo = document.getElementById('rcPegarMsg');
-  const zona   = document.getElementById('rcZona');
-  if (espejo) espejo.innerHTML = zona && zona.style.display !== 'none' ? html : '';
 }
 
 let _rcUnsubscribe = null;
@@ -3000,41 +2996,6 @@ async function rcCargarReporteSAS(file) {
   }
 }
 
-// Botón "📋 Pegar": en el celular no hay Ctrl+V. La API del portapapeles no
-// entrega PDFs (ni en Android ni en iPhone), solo texto: se lee la tabla del
-// reporte copiada del SAS. El PDF copiado se pega en el recuadro de al lado.
-async function rcPegarDelPortapapeles() {
-  const recuadro = document.getElementById('rcPegarTexto');
-  _rcSetMsg('Leyendo el portapapeles…', true);
-  let tiposVistos = [];
-  // Primero un PDF (Safari puede entregarlo tras su burbuja "Pegar")
-  try {
-    if (navigator.clipboard && navigator.clipboard.read) {
-      for (const item of await navigator.clipboard.read()) {
-        tiposVistos = tiposVistos.concat(item.types);
-        const tipo = item.types.find(t => /pdf/i.test(t));
-        if (tipo) {
-          const blob = await item.getType(tipo);
-          rcCargarReporteSAS(new File([blob], 'reporte-sas.pdf', { type: 'application/pdf' }));
-          return;
-        }
-      }
-    }
-  } catch (e) { /* sin read() o sin PDF: se prueba con texto */ }
-  try {
-    const t = await navigator.clipboard.readText();
-    if (t && t.trim().length > 40) { _rcProcesarTextoSAS(t, 'el texto pegado'); return; }
-    _rcSetMsg('⚠ El portapapeles no tiene el reporte (tenía: <b>' + escHtml(tiposVistos.join(', ') || 'nada') +
-              '</b>). Tocá el recuadro 📄 para elegir el PDF.', false);
-  } catch (e) {
-    // Sin permiso o navegador sin la API: queda el "Pegar" nativo del recuadro
-    _rcSetMsg('⚠ El navegador no dejó leer el portapapeles (' + escHtml(e.name || e.message) +
-              (tiposVistos.length ? '; tenía: ' + escHtml(tiposVistos.join(', ')) : '') +
-              '). Mantené presionado el recuadro de al lado del botón y tocá <b>Pegar</b>.', false);
-    if (recuadro) recuadro.focus();
-  }
-}
-
 function _rcProcesarTextoSAS(texto, origen) {
   const parsed = Cuadre.parsearComprobantes(texto);
   _rcCompsSAS  = parsed.comprobantes;
@@ -3089,7 +3050,6 @@ function _rcRenderAnomalias(r) {
 
   if (!huerfanas.length && !extras.length) {
     cont.innerHTML = `<div class="rc-ok">✔ Sin anomalías — las ${r.totales.aperturas} aperturas están justificadas.</div>`;
-    cont.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
@@ -3108,7 +3068,6 @@ function _rcRenderAnomalias(r) {
   if (extras.length) h += '<div class="rc-anom-extra">' + extras.join('<br>') + '</div>';
   h += '</div>';
   cont.innerHTML = h;
-  cont.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ── Cableado de la carga: arrastrar · pegar · buscar ─────────────
@@ -3134,36 +3093,6 @@ function _rcWireCarga() {
   };
 
   caja.addEventListener('click', () => { input.value = ''; input.click(); });
-
-  // Recuadro de pegado: recibe el "Pegar" del menú del celular (Android o
-  // iPhone). Si lo pegado es un archivo (PDF copiado en Archivos), se lee.
-  const recuadro = document.getElementById('rcPegarTexto');
-  //  Es un contenteditable: se intercepta el paste y nunca se deja que el
-  //  navegador inserte nada adentro.
-  if (recuadro) recuadro.addEventListener('paste', e => {
-    e.preventDefault();
-    recuadro.textContent = '';
-    recuadro.blur();
-    const cd = e.clipboardData;
-    if (!cd) { _rcSetMsg('⚠ El navegador no entregó lo pegado. Tocá el recuadro 📄 para elegir el PDF.', false); return; }
-    let f = cd.files && cd.files[0];
-    if (!f && cd.items) {
-      for (const it of cd.items) { if (it.kind === 'file') { f = it.getAsFile(); if (f) break; } }
-    }
-    if (f) { rcCargarReporteSAS(f); return; }
-    const t = cd.getData('text/plain') || cd.getData('text');
-    if (t && t.trim().length > 40) { _rcProcesarTextoSAS(t, 'el texto pegado'); return; }
-    // Diagnóstico: qué entregó el celular, para poder soportarlo
-    const tipos = [...(cd.types || [])].join(', ') || 'nada';
-    _rcSetMsg('⚠ No reconocí lo pegado (el celular entregó: <b>' + escHtml(tipos) + '</b>). ' +
-              'Tocá el recuadro 📄 para elegir el PDF.', false);
-  });
-  // Por si el navegador inserta algo igual (p. ej. arrastrar adentro)
-  if (recuadro) recuadro.addEventListener('input', () => {
-    const t = recuadro.textContent;
-    recuadro.textContent = '';
-    if (t.trim().length > 40) _rcProcesarTextoSAS(t, 'el texto pegado');
-  });
   input.addEventListener('change', e => {
     const f = e.target.files && e.target.files[0];
     if (f) rcCargarReporteSAS(f);
