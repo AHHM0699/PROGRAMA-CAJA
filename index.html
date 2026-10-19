@@ -362,14 +362,26 @@
             <div id="rcAperturasEmpList" style="font-size:13px;color:#6b7280;display:none"></div>
           </div>
 
-          <!-- Carga del reporte de ventas del SAS: arrastrar, pegar o buscar -->
+          <!-- Carga del reporte de ventas del SAS: buscar, pegar o arrastrar -->
           <div id="rcZona" style="display:none;margin-bottom:12px">
             <div class="rc-zona" id="rcZonaCaja">
               <div style="font-size:24px;line-height:1">📄</div>
-              <div style="font-weight:600;margin-top:5px">Arrastrá el reporte del SAS acá</div>
+              <div style="font-weight:600;margin-top:5px">Tocá acá para elegir el PDF del SAS</div>
               <div style="font-size:12px;color:#6b7280;margin-top:4px">
-                o pegalo con <b>Ctrl+V</b> · <span class="rc-enlace">buscar el archivo</span>
+                En la PC también podés arrastrarlo o pegarlo con <b>Ctrl+V</b>
               </div>
+            </div>
+            <!-- En el celular no hay Ctrl+V: botón que lee el portapapeles y,
+                 si el navegador no da permiso, recuadro con el "Pegar" de Android -->
+            <div style="display:flex;gap:8px;align-items:stretch;margin-top:8px">
+              <button type="button" class="btn btn-primary btn-sm" onclick="rcPegarDelPortapapeles()"
+                style="white-space:nowrap">📋 Pegar</button>
+              <textarea id="rcPegarTexto" class="form-control" rows="1"
+                placeholder="…o mantené presionado acá y tocá «Pegar»"
+                style="font-size:13px;border-radius:6px;resize:none"></textarea>
+            </div>
+            <div style="font-size:11px;color:#6b7280;margin-top:4px">
+              Para pegar: en el SAS seleccioná la tabla del reporte y copiala.
             </div>
             <div style="text-align:center;margin-top:6px">
               <span class="rc-enlace" style="font-size:12px" onclick="rcMostrarFormComprobantes()">¿No tenés el PDF? Ingresar la cantidad a mano</span>

@@ -2996,6 +2996,23 @@ async function rcCargarReporteSAS(file) {
   }
 }
 
+// Botón "📋 Pegar": en el celular no hay Ctrl+V. Android no expone archivos
+// copiados a la web, solo texto: se lee la tabla del reporte copiada del SAS.
+async function rcPegarDelPortapapeles() {
+  const recuadro = document.getElementById('rcPegarTexto');
+  try {
+    const t = await navigator.clipboard.readText();
+    if (t && t.trim().length > 40) { _rcProcesarTextoSAS(t, 'el texto pegado'); return; }
+    _rcSetMsg('El portapapeles no tiene el reporte. En el SAS seleccioná la tabla y copiala, ' +
+              'o tocá el recuadro de arriba para elegir el PDF.', false);
+  } catch (e) {
+    // Sin permiso o navegador sin la API: queda el "Pegar" nativo del recuadro
+    _rcSetMsg('El navegador no dejó leer el portapapeles. Mantené presionado el recuadro ' +
+              'de al lado del botón y tocá <b>Pegar</b>.', false);
+    if (recuadro) recuadro.focus();
+  }
+}
+
 function _rcProcesarTextoSAS(texto, origen) {
   const parsed = Cuadre.parsearComprobantes(texto);
   _rcCompsSAS  = parsed.comprobantes;
@@ -3093,6 +3110,17 @@ function _rcWireCarga() {
   };
 
   caja.addEventListener('click', () => { input.value = ''; input.click(); });
+
+  // Recuadro de pegado: recibe el "Pegar" del menú de Android
+  const recuadro = document.getElementById('rcPegarTexto');
+  if (recuadro) recuadro.addEventListener('input', () => {
+    const t = recuadro.value;
+    if (t.trim().length > 40) {               // pegaron el texto del reporte
+      recuadro.value = '';
+      recuadro.blur();
+      _rcProcesarTextoSAS(t, 'el texto pegado');
+    }
+  });
   input.addEventListener('change', e => {
     const f = e.target.files && e.target.files[0];
     if (f) rcCargarReporteSAS(f);
