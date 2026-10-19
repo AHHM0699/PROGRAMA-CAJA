@@ -2996,8 +2996,9 @@ async function rcCargarReporteSAS(file) {
   }
 }
 
-// Botón "📋 Pegar": en el celular no hay Ctrl+V. Android no expone archivos
-// copiados a la web, solo texto: se lee la tabla del reporte copiada del SAS.
+// Botón "📋 Pegar": en el celular no hay Ctrl+V. La API del portapapeles no
+// entrega PDFs (ni en Android ni en iPhone), solo texto: se lee la tabla del
+// reporte copiada del SAS. El PDF copiado se pega en el recuadro de al lado.
 async function rcPegarDelPortapapeles() {
   const recuadro = document.getElementById('rcPegarTexto');
   try {
@@ -3111,8 +3112,18 @@ function _rcWireCarga() {
 
   caja.addEventListener('click', () => { input.value = ''; input.click(); });
 
-  // Recuadro de pegado: recibe el "Pegar" del menú de Android
+  // Recuadro de pegado: recibe el "Pegar" del menú del celular (Android o
+  // iPhone). Si lo pegado es un archivo (PDF copiado en Archivos), se lee.
   const recuadro = document.getElementById('rcPegarTexto');
+  if (recuadro) recuadro.addEventListener('paste', e => {
+    const cd = e.clipboardData;
+    if (!cd) return;
+    let f = cd.files && cd.files[0];
+    if (!f && cd.items) {
+      for (const it of cd.items) { if (it.kind === 'file') { f = it.getAsFile(); if (f) break; } }
+    }
+    if (f) { e.preventDefault(); recuadro.blur(); rcCargarReporteSAS(f); }
+  });
   if (recuadro) recuadro.addEventListener('input', () => {
     const t = recuadro.value;
     if (t.trim().length > 40) {               // pegaron el texto del reporte
