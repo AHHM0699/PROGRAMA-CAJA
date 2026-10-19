@@ -376,12 +376,14 @@
             <div style="display:flex;gap:8px;align-items:stretch;margin-top:8px">
               <button type="button" class="btn btn-primary btn-sm" onclick="rcPegarDelPortapapeles()"
                 style="white-space:nowrap">📋 Pegar</button>
-              <textarea id="rcPegarTexto" class="form-control" rows="1"
-                placeholder="…o mantené presionado acá y tocá «Pegar»"
-                style="font-size:13px;border-radius:6px;resize:none"></textarea>
+              <!-- contenteditable y no textarea: el iPhone solo ofrece "Pegar"
+                   un PDF compartido→copiado en áreas que aceptan contenido rico -->
+              <div id="rcPegarTexto" class="form-control rc-pegar" contenteditable="true"
+                data-placeholder="…o mantené presionado acá y tocá «Pegar»"
+                style="font-size:13px;border-radius:6px;min-height:34px;overflow:hidden;white-space:nowrap"></div>
             </div>
             <div style="font-size:11px;color:#6b7280;margin-top:4px">
-              Podés pegar la tabla copiada del SAS, o el PDF copiado desde la app Archivos.
+              Podés pegar el PDF (en el SAS: Compartir → Copiar) o la tabla copiada del reporte.
             </div>
             <div style="text-align:center;margin-top:6px">
               <span class="rc-enlace" style="font-size:12px" onclick="rcMostrarFormComprobantes()">¿No tenés el PDF? Ingresar la cantidad a mano</span>
