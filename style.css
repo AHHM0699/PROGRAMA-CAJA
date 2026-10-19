@@ -1414,6 +1414,7 @@ kbd {
 }
 .rc-zona:hover { border-color: #1a6b3c; background: #f6fbf8; }
 .rc-zona.sobre { border-color: #1a6b3c; background: #dcfce7; }
+.rc-pegar:empty::before { content: attr(data-placeholder); color: #9ca3af; pointer-events: none; }
 .rc-enlace { color: #1d4ed8; text-decoration: underline; cursor: pointer; }
 @keyframes rcLatido {
   0%   { box-shadow: 0 0 0 0 rgba(26,107,60,.34); }
