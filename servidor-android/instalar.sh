@@ -23,6 +23,10 @@ mkdir -p "$DESTINO/alertas"
 cp "$ORIGEN/alertas/alertas.js" "$ORIGEN/alertas/package.json" "$DESTINO/alertas/"
 (cd "$DESTINO/alertas" && npm install --omit=dev)
 
+# Etiquetas: página web + impresora HT300; solo usa módulos de Node
+mkdir -p "$DESTINO/etiquetas"
+cp -r "$ORIGEN/etiquetas/etiquetas.js" "$ORIGEN/etiquetas/public" "$DESTINO/etiquetas/"
+
 # Lanzador: mantiene el celular despierto y relanza el servidor si se cae
 cat > "$DESTINO/arrancar.sh" <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
@@ -57,6 +61,17 @@ done
 EOF
 chmod +x "$DESTINO/arrancar-alertas.sh"
 
+# Etiquetas: proceso aparte con su propio lanzador; si falla, la caja sigue
+cat > "$DESTINO/arrancar-etiquetas.sh" <<'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+cd "$HOME/servidor-caja/etiquetas"
+while true; do
+  node etiquetas.js >> "$HOME/servidor-caja/etiquetas.log" 2>&1
+  sleep 10
+done
+EOF
+chmod +x "$DESTINO/arrancar-etiquetas.sh"
+
 # Arranque automático: cada vez que se abre Termux (p. ej. tras reiniciar
 # el celular) se lanza el servidor si no está corriendo.
 MARCA="# servidor-caja: arranque automatico"
@@ -81,6 +96,13 @@ $MARCA_AL
 pgrep -f servidor-caja/arrancar-alertas.sh >/dev/null || nohup "\$HOME/servidor-caja/arrancar-alertas.sh" >/dev/null 2>&1 &
 EOF
 fi
+MARCA_ET="# servidor-caja: etiquetas"
+if ! grep -q "$MARCA_ET" "$HOME/.bashrc" 2>/dev/null; then
+  cat >> "$HOME/.bashrc" <<EOF
+$MARCA_ET
+pgrep -f servidor-caja/arrancar-etiquetas.sh >/dev/null || nohup "\$HOME/servidor-caja/arrancar-etiquetas.sh" >/dev/null 2>&1 &
+EOF
+fi
 
 echo
 echo "Instalado."
@@ -90,6 +112,7 @@ echo "Ver la cámara:    tail -f ~/servidor-caja/camara.log"
 [ -f "$DESTINO/alertas/whatsapp-sesion/creds.json" ] || \
   echo "FALTA: vincular WhatsApp ->  cd ~/servidor-caja/alertas && node alertas.js --vincular 51NUMERO_DEL_SAMSUNG"
 echo "Ver las alertas:  tail -f ~/servidor-caja/alertas.log"
+echo "Etiquetas:        http://IP_DEL_SAMSUNG:8091  (registro: tail -f ~/servidor-caja/etiquetas.log)"
 [ -f "$HOME/.config/configstore/firebase-tools.json" ] || \
   echo "FALTA: inicia sesión con tu Gmail ->  firebase login --no-localhost"
 echo "Ver el registro:  tail -f ~/servidor-caja/servidor.log"
