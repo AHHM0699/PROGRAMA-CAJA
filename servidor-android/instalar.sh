@@ -82,6 +82,18 @@ pgrep -f servidor-caja/arrancar-alertas.sh >/dev/null || nohup "\$HOME/servidor-
 EOF
 fi
 
+# Arranque al encender el celular, sin abrir Termux (Termux de Google Play
+# trae Termux:Boot integrado: corre lo que haya en ~/.termux/boot).
+mkdir -p "$HOME/.termux/boot"
+cat > "$HOME/.termux/boot/servidor-caja.sh" <<'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+termux-wake-lock
+for s in arrancar arrancar-camara arrancar-alertas; do
+  pgrep -f "servidor-caja/$s.sh" >/dev/null || nohup "$HOME/servidor-caja/$s.sh" >/dev/null 2>&1 &
+done
+EOF
+chmod +x "$HOME/.termux/boot/servidor-caja.sh"
+
 echo
 echo "Instalado."
 [ -f "$DESTINO/drive-token.json" ] || \
