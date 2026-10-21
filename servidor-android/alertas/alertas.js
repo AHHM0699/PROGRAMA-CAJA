@@ -43,6 +43,26 @@ function horaPE(d) {
   }).format(d);
 }
 
+// libsignal escribe en consola cada mensaje ENTRANTE que no logra descifrar
+// (al Samsung le llegan copias de todos sus chats). No afecta las alertas,
+// pero llenaba el log con cientos de líneas por minuto: se cuentan y se
+// resumen cada 10 minutos (si hubo).
+const RUIDO_SIGNAL = /^(Session error|Failed to decrypt|Opening session|Closing |Migrating session|Session already|Removing old closed session|Decrypted message with closed session)/;
+let noDescifrados = 0;
+for (const k of ['log', 'error', 'warn', 'info']) {
+  const original = console[k].bind(console);
+  console[k] = (...a) => {
+    const t = typeof a[0] === 'string' ? a[0] : '';
+    if (!RUIDO_SIGNAL.test(t)) return original(...a);
+    if (t.startsWith('Failed to decrypt')) noDescifrados++;
+  };
+}
+setInterval(() => {
+  if (!noDescifrados) return;
+  log(`Mensajes entrantes sin descifrar en 10 min: ${noDescifrados} (no afecta las alertas)`);
+  noDescifrados = 0;
+}, 600e3);
+
 const vincular = process.argv.indexOf('--vincular');
 const NUMERO_SAMSUNG = vincular > -1 ? String(process.argv[vincular + 1] || '').replace(/\D/g, '') : '';
 if (!DESTINO && vincular < 0) { log('Falta alertas.whatsapp en config.json'); process.exit(1); }
@@ -51,39 +71,84 @@ if (!DESTINO && vincular < 0) { log('Falta alertas.whatsapp en config.json'); pr
 //  WHATSAPP
 // ════════════════════════════════════════════════════════════════════
 const {
-  default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers
+  default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers,
+  makeCacheableSignalKeyStore, proto
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
+const logger = pino({ level: 'silent' });
 
 let sock = null;
 let listo = false;
 const cola = [];      // mensajes esperando conexión
 
+// ── Mensajes enviados ───────────────────────────────────────────────
+// Si el celular que recibe no logra descifrar un mensaje, pide que se lo
+// reenvíen. Sin el mensaje guardado no hay qué reenviar y en el destino
+// queda para siempre "Esperando mensaje".
+const ENVIADOS = path.join(__dirname, 'enviados.json');
+const MAX_ENVIADOS = 300;
+let enviados = {};
+try { enviados = JSON.parse(fs.readFileSync(ENVIADOS, 'utf8')); } catch (e) { /* vacío */ }
+function guardarEnviado(m) {
+  if (!m || !m.key || !m.key.id || !m.message) return;
+  enviados[m.key.id] = m.message;
+  const ids = Object.keys(enviados);
+  for (const id of ids.slice(0, Math.max(0, ids.length - MAX_ENVIADOS))) delete enviados[id];
+  try { fs.writeFileSync(ENVIADOS, JSON.stringify(enviados)); } catch (e) { log('No se pudo guardar enviados:', e.message); }
+}
+async function getMessage(key) {
+  const m = key && enviados[key.id];
+  if (m) log('Reenviando mensaje que el destino no pudo descifrar');
+  return m ? proto.Message.fromObject(m) : undefined;
+}
+
+// Cuenta los reintentos de cada mensaje (Baileys pide get/set/del/flushAll)
+const reintentos = new Map();
+const msgRetryCounterCache = {
+  get: k => reintentos.get(k), set: (k, v) => { reintentos.set(k, v); },
+  del: k => { reintentos.delete(k); }, flushAll: () => reintentos.clear(),
+};
+
+// La sesión se carga UNA vez y se comparte entre reconexiones: dos copias
+// escribiendo los mismos archivos desordenan las claves de cifrado
+let auth = null;
+let reconexion = null;
+
 async function conectar() {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  if (!auth) auth = await useMultiFileAuthState(AUTH_DIR);
+  const { state, saveCreds } = auth;
   let version;
   try { ({ version } = await fetchLatestBaileysVersion()); } catch (e) { /* usa la de la librería */ }
 
+  // Nunca dos conexiones a la vez: se cierra la anterior antes de abrir otra
+  if (sock) {
+    try { sock.ev.removeAllListeners(); sock.end(undefined); } catch (e) {}
+    sock = null;
+  }
+
   sock = makeWASocket({
-    auth: state, version,
-    logger: pino({ level: 'silent' }),
+    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
+    version, logger,
     printQRInTerminal: false,
     markOnlineOnConnect: false,
     syncFullHistory: false,
+    getMessage, msgRetryCounterCache,
     // La vinculación por código solo acepta navegadores conocidos
     browser: Browsers.ubuntu('Chrome'),
   });
   sock.ev.on('creds.update', saveCreds);
 
-  if (NUMERO_SAMSUNG && !state.creds.registered) {
-    setTimeout(async () => {
-      try {
-        const codigo = await sock.requestPairingCode(NUMERO_SAMSUNG);
-        log(`CÓDIGO DE VINCULACIÓN: ${codigo}`);
-        log('En el Samsung: WhatsApp → Dispositivos vinculados → Vincular con número de teléfono');
-      } catch (e) { log('No se pudo pedir el código:', e.message); }
-    }, 3000);
-  }
+  // El código se pide cuando WhatsApp ya está listo para vincular (evento qr)
+  let pidioCodigo = false;
+  sock.ev.on('connection.update', async ({ qr }) => {
+    if (!qr || !NUMERO_SAMSUNG || pidioCodigo || state.creds.registered) return;
+    pidioCodigo = true;
+    try {
+      const codigo = await sock.requestPairingCode(NUMERO_SAMSUNG);
+      log(`CÓDIGO DE VINCULACIÓN: ${codigo}`);
+      log('En el Samsung: WhatsApp → Dispositivos vinculados → Vincular con número de teléfono');
+    } catch (e) { log('No se pudo pedir el código:', e.message); }
+  });
 
   sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
     if (connection === 'open') {
@@ -98,10 +163,17 @@ async function conectar() {
         ? lastDisconnect.error.output.statusCode : 0;
       if (codigo === DisconnectReason.loggedOut) {
         log('WhatsApp cerró la sesión: hay que volver a vincular (node alertas.js --vincular ...)');
+        // Una sesión a medio vincular no sirve: se borra para empezar limpio
+        if (vincular > -1) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         process.exit(2);
       }
       log(`WhatsApp desconectado (${codigo || 'sin código'}) — reconecto en 10s`);
-      setTimeout(() => conectar().catch(e => log('Error al reconectar:', e.message)), 10000);
+      // Una sola reconexión pendiente aunque lleguen varios "close" seguidos
+      if (reconexion) return;
+      reconexion = setTimeout(() => {
+        reconexion = null;
+        conectar().catch(e => log('Error al reconectar:', e.message));
+      }, 10000);
     }
   });
 }
@@ -118,7 +190,8 @@ async function vaciarCola() {
   enviando = true;
   try {
     while (cola.length && listo) {
-      await sock.sendMessage(`${DESTINO}@s.whatsapp.net`, { text: cola[0] });
+      const m = await sock.sendMessage(`${DESTINO}@s.whatsapp.net`, { text: cola[0] });
+      guardarEnviado(m);
       cola.shift();
     }
   } catch (e) {
@@ -166,5 +239,14 @@ if (vincular < 0) {
 if (vincular < 0 && !fs.existsSync(path.join(AUTH_DIR, 'creds.json'))) {
   log('FALTA vincular WhatsApp:  node alertas.js --vincular 51XXXXXXXXX');
 } else {
+  // Borra TODAS las sesiones de cifrado y claves de grupo (no la
+  // vinculación): WhatsApp las vuelve a armar en el próximo mensaje
+  if (process.argv.includes('--reiniciar-cifrado')) {
+    let n = 0;
+    for (const f of fs.readdirSync(AUTH_DIR)) {
+      if (/^(session|sender-key)-/.test(f)) { fs.rmSync(path.join(AUTH_DIR, f)); n++; }
+    }
+    log(`Sesiones de cifrado borradas: ${n}`);
+  }
   conectar().catch(e => { log('Error de WhatsApp:', e.message); process.exit(1); });
 }

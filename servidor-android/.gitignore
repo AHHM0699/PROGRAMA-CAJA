@@ -7,3 +7,4 @@ data/
 drive-token.json
 alertas/node_modules/
 alertas/whatsapp-sesion/
+alertas/enviados.json
