@@ -15,3 +15,6 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           projectId: programa-caja
           channelId: live
+          # 15.34.1 consulta serviceusage.googleapis.com y la cuenta de
+          # servicio no tiene ese permiso (403): se fija la última que andaba
+          firebaseToolsVersion: 15.34.0
