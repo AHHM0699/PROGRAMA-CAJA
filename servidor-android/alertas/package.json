@@ -5,7 +5,7 @@
   "description": "Alertas por WhatsApp de aperturas de gaveta que no son impresiones (proceso aparte)",
   "main": "alertas.js",
   "dependencies": {
-    "@whiskeysockets/baileys": "6.7.24",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "pino": "9.14.0"
   }
 }

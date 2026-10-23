@@ -21,7 +21,8 @@ npm install --omit=dev
 # Alertas por WhatsApp: carpeta y dependencias propias (no tocan las del servidor)
 mkdir -p "$DESTINO/alertas"
 cp "$ORIGEN/alertas/alertas.js" "$ORIGEN/alertas/package.json" "$DESTINO/alertas/"
-(cd "$DESTINO/alertas" && npm install --omit=dev)
+# --legacy-peer-deps: sin sharp ni jimp (las alertas solo mandan texto)
+(cd "$DESTINO/alertas" && npm install --omit=dev --legacy-peer-deps)
 
 # Lanzador: mantiene el celular despierto y relanza el servidor si se cae
 cat > "$DESTINO/arrancar.sh" <<'EOF'

@@ -70,10 +70,18 @@ if (!DESTINO && vincular < 0) { log('Falta alertas.whatsapp en config.json'); pr
 // ════════════════════════════════════════════════════════════════════
 //  WHATSAPP
 // ════════════════════════════════════════════════════════════════════
-const {
-  default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers,
-  makeCacheableSignalKeyStore, proto
-} = require('@whiskeysockets/baileys');
+// Baileys 7 cifra para el LID del destino (con la 6 el celular del dueño
+// no descifraba la primera entrega y todo dependía del reenvío). Es un
+// módulo ESM: se carga con import() al conectar.
+let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers,
+  makeCacheableSignalKeyStore, proto;
+async function cargarBaileys() {
+  if (makeWASocket) return;
+  ({
+    default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers,
+    makeCacheableSignalKeyStore, proto
+  } = await import('@whiskeysockets/baileys'));
+}
 const pino = require('pino');
 const logger = pino({ level: 'silent' });
 
@@ -115,6 +123,7 @@ let auth = null;
 let reconexion = null;
 
 async function conectar() {
+  await cargarBaileys();
   if (!auth) auth = await useMultiFileAuthState(AUTH_DIR);
   const { state, saveCreds } = auth;
   let version;
@@ -137,6 +146,19 @@ async function conectar() {
     browser: Browsers.ubuntu('Chrome'),
   });
   sock.ev.on('creds.update', saveCreds);
+
+  // Quién pide un reenvío (celular del dueño, otro dispositivo o el propio
+  // Samsung): dice por qué un mensaje se queda en "Esperando mensaje"
+  sock.ws.on('CB:receipt', node => {
+    if (!node.attrs || node.attrs.type !== 'retry') return;
+    const [usuario, dominio] = String(node.attrs.participant || node.attrs.from || '').split('@');
+    const [num, disp] = usuario.split(':');
+    const yo = sock.user ? [sock.user.id, sock.user.lid] : [];
+    const quien = num === DESTINO ? 'dueño'
+      : yo.some(j => j && j.split(/[:@]/)[0] === num) ? 'Samsung' : 'otro';
+    const r = Array.isArray(node.content) && node.content.find(c => c.tag === 'retry');
+    log(`Pedido de reenvío: ${quien}${dominio === 'lid' ? ' (lid)' : ''}, dispositivo ${disp || 0}, intento ${r ? r.attrs.count : '?'}`);
+  });
 
   // El código se pide cuando WhatsApp ya está listo para vincular (evento qr)
   let pidioCodigo = false;
