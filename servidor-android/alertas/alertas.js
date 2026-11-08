@@ -11,6 +11,8 @@
 //  - Usa WhatsApp como "dispositivo vinculado" (Baileys, no oficial).
 //    Primera vez:  node alertas.js --vincular 51XXXXXXXXX  (número del
 //    Samsung) y escribir el código en WhatsApp → Dispositivos vinculados.
+//  - Además lee las fotos del grupo "YAPES//TRANSFERENCIAS" y agrega el
+//    monto a los Yapes de la caja abierta (ver grupo-yapes.js).
 // ════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -74,16 +76,28 @@ if (!DESTINO && vincular < 0) { log('Falta alertas.whatsapp en config.json'); pr
 // no descifraba la primera entrega y todo dependía del reenvío). Es un
 // módulo ESM: se carga con import() al conectar.
 let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers,
-  makeCacheableSignalKeyStore, proto;
+  makeCacheableSignalKeyStore, proto, baileys;
 async function cargarBaileys() {
   if (makeWASocket) return;
+  baileys = await import('@whiskeysockets/baileys');
   ({
     default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers,
     makeCacheableSignalKeyStore, proto
-  } = await import('@whiskeysockets/baileys'));
+  } = baileys);
 }
 const pino = require('pino');
 const logger = pino({ level: 'silent' });
+
+// Yapes automáticos (grupo-yapes.js). Si falla, las alertas siguen.
+let yapes = null;
+function iniciarYapes() {
+  if (yapes || vincular > -1 || AL.grupoYapes === false) return;
+  try {
+    yapes = require('./grupo-yapes').crear({
+      config: { ...AL, projectId: CONFIG.projectId }, log, baileys, logger, getSock: () => (listo ? sock : null),
+    });
+  } catch (e) { log('Yapes automáticos desactivados:', e.message); yapes = { engancharSocket() {} }; }
+}
 
 let sock = null;
 let listo = false;
@@ -146,6 +160,8 @@ async function conectar() {
     browser: Browsers.ubuntu('Chrome'),
   });
   sock.ev.on('creds.update', saveCreds);
+  iniciarYapes();
+  if (yapes) yapes.engancharSocket(sock);
 
   // Quién pide un reenvío (celular del dueño, otro dispositivo o el propio
   // Samsung): dice por qué un mensaje se queda en "Esperando mensaje"

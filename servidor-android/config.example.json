@@ -19,6 +19,7 @@
     "clientSecret": "PEGAR_CLIENT_SECRET"
   },
   "alertas": {
-    "whatsapp": "51XXXXXXXXX"
+    "whatsapp": "51XXXXXXXXX",
+    "grupoYapes": "YAPES//TRANSFERENCIAS"
   }
 }

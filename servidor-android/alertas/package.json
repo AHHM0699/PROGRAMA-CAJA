@@ -2,7 +2,7 @@
   "name": "alertas-caja",
   "version": "1.0.0",
   "private": true,
-  "description": "Alertas por WhatsApp de aperturas de gaveta que no son impresiones (proceso aparte)",
+  "description": "Alertas por WhatsApp de aperturas de gaveta y Yapes automáticos desde el grupo (proceso aparte)",
   "main": "alertas.js",
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc14",
