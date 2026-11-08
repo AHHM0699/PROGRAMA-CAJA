@@ -6,9 +6,12 @@
 //  1. Llega una foto al grupo "YAPES//TRANSFERENCIAS" (alertas.grupoYapes).
 //  2. El Claude Code del celular (`claude -p` en Debian, usa el plan del
 //     dueño, sin API) lee el monto del comprobante.
-//  3. El monto se agrega al final de los Yapes de la caja abierta
-//     (cajas/{id}.yapesRaw), igual que si se escribiera a mano; la webapp
-//     se sincroniza sola. A la foto se le pone la reacción ✅.
+//  3. El monto queda en la lista del día yapesGrupo/{fecha} (aunque no
+//     haya caja abierta) y se agrega al final de los Yapes de la caja
+//     abierta (cajas/{id}.yapesRaw, y su id en yapesGrupoIds), igual que si
+//     se escribiera a mano; la webapp se sincroniza sola. A la foto se le
+//     pone ✅. El botón "💚 Yapes" de la webapp completa desde esa lista
+//     lo que falte en la caja, sin duplicar.
 //  4. Si no se puede leer, el Samsung responde a la foto en el grupo
 //     pidiendo el monto como texto. Un mensaje que es SOLO un monto
 //     ("25.50", "S/ 25.50") también se agrega.
@@ -48,6 +51,9 @@ function normalizar(s) {
   return String(s || '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 function fechaPE(d) { return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d); }
+function horaPE(d) {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+}
 
 function crear({ config, log, baileys, logger, getSock }) {
   const NOMBRE_GRUPO = normalizar(config.grupoYapes || 'YAPES//TRANSFERENCIAS');
@@ -110,10 +116,10 @@ function crear({ config, log, baileys, logger, getSock }) {
   }
 
   // ── Firebase (firebase-admin viene de ../node_modules del servidor) ──
-  let db = null;
+  let db = null, FieldValue = null;
   async function iniciarFirebase() {
     const { initializeApp, getApps, applicationDefault } = require('firebase-admin/app');
-    const { getFirestore } = require('firebase-admin/firestore');
+    const fsMod = require('firebase-admin/firestore');
     const store = JSON.parse(fs.readFileSync(FIREBASE_TOOLS_STORE, 'utf8'));
     const refresh = store.tokens && store.tokens.refresh_token;
     if (!refresh) throw new Error('falta la sesión: firebase login --no-localhost');
@@ -124,9 +130,9 @@ function crear({ config, log, baileys, logger, getSock }) {
     }), { mode: 0o600 });
     process.env.GOOGLE_APPLICATION_CREDENTIALS = ADC_FILE;
     if (!getApps().length) initializeApp({ credential: applicationDefault(), projectId: PROJECT_ID });
-    const base = getFirestore();
+    const base = fsMod.getFirestore();
     await base.doc('requests/reporte-caja').get();   // valida la sesión
-    db = base;
+    db = base; FieldValue = fsMod.FieldValue;
     log('Yapes: Firebase conectado');
   }
   function arrancarFirebase() {
@@ -138,8 +144,7 @@ function crear({ config, log, baileys, logger, getSock }) {
 
   // Agrega el monto a la caja abierta (si hubiera dos, la abierta hoy).
   // Devuelve el nombre de la caja o null si no hay ninguna abierta.
-  async function agregarACaja(monto) {
-    if (!db) throw new Error('sin conexión a Firebase');
+  async function agregarACaja(monto, id) {
     const snap = await db.collection('cajas').where('cajaAbierta', '==', true).get();
     const abiertas = snap.docs.filter(d => !d.data().eliminada);
     if (!abiertas.length) return null;
@@ -156,9 +161,11 @@ function crear({ config, log, baileys, logger, getSock }) {
         bref = db.doc(`historial/${c.historialBorradorId}`);
         b = await tx.get(bref);
       }
+      const ids = Array.isArray(c.yapesGrupoIds) ? c.yapesGrupoIds : [];
+      if (ids.includes(id)) return;   // ya lo agregó el botón de la webapp
       const raw = (typeof c.yapesRaw === 'string' && c.yapesRaw.trim() ? c.yapesRaw.trimEnd() + '\n' : '') + monto.toFixed(2);
       // _ts más nuevo: la webapp lo toma como cambio remoto y lo muestra
-      tx.update(caja.ref, { yapesRaw: raw, _ts: Date.now() });
+      tx.update(caja.ref, { yapesRaw: raw, yapesGrupoIds: [...ids, id], _ts: Date.now() });
       // El borrador del historial también lleva los Yapes y su total
       if (b && b.exists && b.data().estado !== 'cerrado') {
         const total = raw.split('\n').reduce((t, x) => { const v = parseFloat(x); return t + (isNaN(v) || v < 0 ? 0 : v); }, 0);
@@ -198,9 +205,27 @@ function crear({ config, log, baileys, logger, getSock }) {
     await sock.sendMessage(m.key.remoteJid, { react: { text: emoji, key: m.key } }).catch(() => {});
   }
 
+  // Lista del día: de aquí completa el botón "💚 Yapes" de la webapp
+  async function registrarDelDia(m, monto, origen) {
+    const d = new Date(Number(m.messageTimestamp || 0) * 1000 || Date.now());
+    const fecha = fechaPE(d);
+    await db.doc(`yapesGrupo/${fecha}`).set({
+      fecha,
+      lista: FieldValue.arrayUnion({ id: m.key.id, monto, hora: horaPE(d), origen }),
+      actualizado: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
   async function sumar(m, monto, origen) {
+    if (!db) {
+      log(`Yapes: S/ ${monto.toFixed(2)} sin conexión a Firebase`);
+      await responder(m, `⚠️ No pude registrar S/ ${monto.toFixed(2)}. Agrégalo a mano.`);
+      return 0;
+    }
+    try { await registrarDelDia(m, monto, origen); }
+    catch (e) { log('Yapes: no se pudo guardar en la lista del día:', e.message); }
     let caja;
-    try { caja = await agregarACaja(monto); }
+    try { caja = await agregarACaja(monto, m.key.id); }
     catch (e) {
       log(`Yapes: no se pudo agregar S/ ${monto.toFixed(2)}:`, e.message);
       await responder(m, `⚠️ No pude agregar S/ ${monto.toFixed(2)} a la caja. Agrégalo a mano.`);
@@ -208,7 +233,8 @@ function crear({ config, log, baileys, logger, getSock }) {
     }
     if (!caja) {
       log(`Yapes: S/ ${monto.toFixed(2)} (${origen}) sin caja abierta`);
-      await responder(m, `⚠️ No hay caja abierta. Agrega S/ ${monto.toFixed(2)} a mano cuando se abra.`);
+      await reaccionar(m, '📝');
+      await responder(m, `📝 S/ ${monto.toFixed(2)} guardado. No hay caja abierta: al abrirla, toca "💚 Yapes" para cargarlo.`);
       return 0;
     }
     log(`Yapes: + S/ ${monto.toFixed(2)} (${origen}) → ${caja}`);

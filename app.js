@@ -50,7 +50,7 @@ const STATE_FIELDS = [
   'cajaAbierta', 'nombre', 'cajaInicial', 'ventasHastaAhora', 'ultimoYape',
   'aperturaFecha', 'inicialMode', 'inicialBreakdown',
   'eventos', 'yapesRaw', 'aperturasCaja', 'rcRegistros', '_ts', 'historialBorradorId',
-  'conteoEmpleado',
+  'conteoEmpleado', 'yapesGrupoIds',
 ];
 
 // ============================================================
@@ -63,6 +63,7 @@ function _defaultState() {
     inicialMode: 'monto', inicialBreakdown: null,
     eventos: [], yapesRaw: '', aperturasCaja: [], rcRegistros: [], _ts: 0,
     historialBorradorId: null, conteoEmpleado: null,
+    yapesGrupoIds: [],   // ids de mensajes del grupo de Yapes ya cargados en esta caja
   };
 }
 
@@ -313,6 +314,66 @@ function _applyRoleUI() {
   document.getElementById('btnHistorial').classList.toggle('hidden', isEmp);
   document.getElementById('btnFlujo').classList.toggle('hidden', isEmp);
   document.getElementById('btnCajas').classList.toggle('hidden', false);
+}
+
+// ── Botón "💚 Yapes": completa los Yapes del día desde el grupo de WhatsApp ──
+//  El Samsung guarda en yapesGrupo/{fecha}.lista cada monto que lee del
+//  grupo YAPES//TRANSFERENCIAS ({ id, monto, hora, origen }). Aquí se agregan
+//  a la caja los que falten, sin duplicar:
+//   - los que ya entraron (los sumó el Samsung o un toque anterior) se
+//     reconocen por su id (state.yapesGrupoIds);
+//   - los escritos a mano se reconocen por el monto: si en la caja hay un
+//     monto igual que no viene del grupo, se da por ya registrado.
+async function completarYapesDelDia(btn) {
+  if (!currentCajaId) { showSyncToast('Abre una caja primero'); return; }
+  if (btn) btn.disabled = true;
+  try {
+    const snap  = await db.doc(`yapesGrupo/${_todayPE()}`).get();
+    const lista = (snap.exists ? (snap.data().lista || []) : [])
+      .slice().sort((a, b) => String(a.hora).localeCompare(String(b.hora)));
+    if (!lista.length) { showSyncToast('💚 Todavía no hay yapes del grupo hoy'); return; }
+
+    const cent = v => Math.round(parseFloat(v) * 100);
+    const ids  = new Set(state.yapesGrupoIds || []);
+    // Montos de la caja que no vienen de un mensaje ya cargado = escritos a mano
+    const aMano = new Map();
+    (state.yapesRaw || '').split('\n').forEach(x => {
+      const c = cent(x); if (!isNaN(c) && c > 0) aMano.set(c, (aMano.get(c) || 0) + 1);
+    });
+    lista.filter(y => ids.has(y.id)).forEach(y => {
+      const c = cent(y.monto); if (aMano.get(c) > 0) aMano.set(c, aMano.get(c) - 1);
+    });
+
+    const nuevos = [];
+    let yaEstaban = 0;
+    for (const y of lista) {
+      if (ids.has(y.id)) continue;
+      const c = cent(y.monto);
+      if (isNaN(c) || c <= 0) continue;
+      if (aMano.get(c) > 0) { aMano.set(c, aMano.get(c) - 1); yaEstaban++; }
+      else nuevos.push(c / 100);
+      ids.add(y.id);
+    }
+    state.yapesGrupoIds = [...ids];
+    if (nuevos.length) {
+      state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') +
+        nuevos.map(v => v.toFixed(2)).join('\n');
+    }
+    const adminEl = document.getElementById('yapesInput');
+    if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
+    _renderEmpYapesList();
+    saveStateNow();
+
+    const total = round2(nuevos.reduce((t, v) => t + v, 0));
+    showSyncToast(nuevos.length
+      ? `💚 ${nuevos.length} yape(s) agregado(s) · S/. ${total.toFixed(2)}` + (yaEstaban ? ` · ${yaEstaban} ya estaban` : '')
+      : '💚 Los yapes del grupo ya estaban todos');
+  } catch (e) {
+    console.warn('completarYapesDelDia:', e);
+    showSyncToast('⚠ No se pudieron leer los yapes del grupo (' + (e.code || e.message) + ')');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 let _yapesWin = null;
@@ -1188,6 +1249,7 @@ function _applyRemoteState(remote) {
   });
   if (!Array.isArray(state.eventos))    state.eventos  = [];
   if (typeof state.yapesRaw !== 'string') state.yapesRaw = '';
+  if (!Array.isArray(state.yapesGrupoIds)) state.yapesGrupoIds = [];
 
   if (state.cajaAbierta) {
     setMode('inicial', state.inicialMode || 'monto');
@@ -1343,6 +1405,7 @@ function guardarApertura() {
   state.aperturaFecha    = new Date().toISOString();
   state.inicialBreakdown = state.inicialMode === 'denom' ? getDenomBreakdown('inicial') : null;
   state.yapesRaw         = '';
+  state.yapesGrupoIds    = [];
   state.eventos          = [];
   state._ts              = Date.now();
 
