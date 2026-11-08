@@ -58,8 +58,8 @@ function crear({ config, log, baileys, logger, getSock }) {
   //  En el Samsung, Claude Code vive en Debian (proot-distro) dentro de
   //  Termux. Se llama directo (no con el `claude` de Termux, que abre en el
   //  home y carga su CLAUDE.md): parado en la carpeta de la foto, solo con
-  //  la herramienta Read y sin MCP, skills ni ajustes (~9 mil tokens por
-  //  foto, casi todos de caché). La carpeta se borra al terminar.
+  //  la herramienta Read, instrucciones propias cortas y sin MCP, skills ni
+  //  ajustes (~5 mil tokens por foto; Claude se abre con cada foto y se cierra). La carpeta se borra al terminar.
   const PROOT  = path.join(process.env.PREFIX || '/data/data/com.termux/files/usr', 'bin', 'proot-distro');
   const DEBIAN = config.claudeDebian !== false && fs.existsSync(PROOT);
   const MODELO = config.modeloYapes || '';   // vacío: el modelo por defecto de Claude Code
@@ -71,6 +71,8 @@ function crear({ config, log, baileys, logger, getSock }) {
     const foto = 'foto.' + ext;
     fs.writeFileSync(path.join(dir, foto), buf);
     const claudeArgs = ['-p', `Lee la imagen ./${foto} con la herramienta Read.\n\n${PROMPT}\n\nResponde SOLO con un objeto JSON en una línea, sin texto adicional, con este formato: {"es_comprobante": true, "monto": 25.5, "legible": true}`,
+      // Instrucciones propias de 2 líneas en vez de las de Claude Code: la mitad de tokens
+      '--system-prompt', 'Lees fotos de comprobantes de pago (Yape, Plin, transferencias) de una tienda en Perú. Usa la herramienta Read para abrir la imagen indicada y responde únicamente con el JSON pedido, sin otro texto.',
       '--output-format', 'json', '--tools', 'Read', '--allowedTools', 'Read', '--max-turns', '4',
       '--strict-mcp-config', '--setting-sources', 'project', '--disable-slash-commands'];
     if (MODELO) claudeArgs.push('--model', MODELO);
