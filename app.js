@@ -1666,23 +1666,36 @@ function toggleConteoEmpleado() {
   if (chevron) chevron.textContent = visible ? '▼' : '▲';
 }
 
-let _conteoEmpleadoPrefillDone = false;
+let _conteoEmpleadoPrefillDone = false;   // ya no se usa (se mantiene por compatibilidad)
 
+// Pinta el conteo del empleado desde el estado, SIN guardar. Se llama al
+// mostrar la vista y cada vez que llega un cambio de otro dispositivo, para
+// que los casilleros nunca queden con un conteo viejo (antes se llenaban una
+// sola vez y, al tocar uno, se guardaba el conteo viejo encima del nuevo).
+// No se toca mientras el empleado está escribiendo en un casillero.
 function _renderConteoEmpleadoSide() {
   _updateConteoEmpleadoBadge();
-  if (_conteoEmpleadoPrefillDone) return;
-  _conteoEmpleadoPrefillDone = true;
-  const qtys = state.conteoEmpleado?.qtys;
-  if (!Array.isArray(qtys)) return;
-  qtys.forEach((qty, i) => {
-    if (!qty) return;
+  const act = document.activeElement;
+  if (act && /^empConteoQty\d+$/.test(act.id || '')) return;
+  const qtys = Array.isArray(state.conteoEmpleado?.qtys) ? state.conteoEmpleado.qtys : [];
+  let hay = false;
+  DENOMS.forEach((d, i) => {
     const input = document.getElementById(`empConteoQty${i}`);
-    if (input) { input.value = qty; onDenomInput('empConteo', i); }
+    if (!input) return;
+    hay = true;
+    const q = parseFloat(qtys[i]) || 0;
+    input.value = q ? q : '';
+    const sub = document.getElementById(`empConteoSub${i}`);
+    if (sub) sub.textContent = fmt(round2(q * d.val));
   });
+  if (!hay) return;
+  const tot = document.getElementById(DENOM_TOTAL_IDS.empConteo);
+  if (tot) tot.textContent = fmt(getDenomTotal('empConteo'));
   const fb = document.getElementById('empConteoGuardado');
-  if (fb && state.conteoEmpleado?.fecha) {
-    const hora = new Date(state.conteoEmpleado.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
-    fb.textContent = `✔ Guardado ${hora}`;
+  if (fb) {
+    fb.textContent = state.conteoEmpleado?.fecha
+      ? `✔ Guardado ${new Date(state.conteoEmpleado.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })}`
+      : '';
   }
 }
 
