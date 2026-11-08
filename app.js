@@ -316,58 +316,94 @@ function _applyRoleUI() {
   document.getElementById('btnCajas').classList.toggle('hidden', false);
 }
 
-// ── Botón "💚 Yapes": completa los Yapes del día desde el grupo de WhatsApp ──
-//  El Samsung guarda en yapesGrupo/{fecha}.lista cada monto que lee del
-//  grupo YAPES//TRANSFERENCIAS ({ id, monto, hora, origen }). Aquí se agregan
-//  a la caja los que falten, sin duplicar:
-//   - los que ya entraron (los sumó el Samsung o un toque anterior) se
-//     reconocen por su id (state.yapesGrupoIds);
+// ── Yapes del grupo de WhatsApp YAPES//TRANSFERENCIAS ─────────────────
+//  El Samsung (servidor-android/alertas/grupo-yapes.js) lee el monto de cada
+//  foto del grupo y lo guarda en yapesGrupo/{fecha}.lista ({ id, monto,
+//  hora, origen }). SOLO la webapp escribe los Yapes de la caja: mientras
+//  la caja de hoy está abierta en pantalla, cada yape nuevo de la lista se
+//  agrega solo; el botón "💚 Yapes" hace lo mismo a pedido. Sin duplicar:
+//   - los ya cargados se reconocen por su id (state.yapesGrupoIds);
 //   - los escritos a mano se reconocen por el monto: si en la caja hay un
 //     monto igual que no viene del grupo, se da por ya registrado.
+function _mergeYapesGrupo(lista) {
+  lista = (lista || []).slice().sort((a, b) => String(a.hora).localeCompare(String(b.hora)));
+  const cent = v => Math.round(parseFloat(v) * 100);
+  const ids  = new Set(state.yapesGrupoIds || []);
+  // Montos de la caja que no vienen de un mensaje ya cargado = escritos a mano
+  const aMano = new Map();
+  (state.yapesRaw || '').split('\n').forEach(x => {
+    const c = cent(x); if (!isNaN(c) && c > 0) aMano.set(c, (aMano.get(c) || 0) + 1);
+  });
+  lista.filter(y => ids.has(y.id)).forEach(y => {
+    const c = cent(y.monto); if (aMano.get(c) > 0) aMano.set(c, aMano.get(c) - 1);
+  });
+
+  const nuevos = [];
+  let yaEstaban = 0, cambio = false;
+  for (const y of lista) {
+    if (!y || !y.id || ids.has(y.id)) continue;
+    const c = cent(y.monto);
+    if (isNaN(c) || c <= 0) continue;
+    if (aMano.get(c) > 0) { aMano.set(c, aMano.get(c) - 1); yaEstaban++; }
+    else nuevos.push(c / 100);
+    ids.add(y.id); cambio = true;
+  }
+  if (!cambio) return { nuevos, yaEstaban };
+
+  state.yapesGrupoIds = [...ids];
+  if (nuevos.length) {
+    state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') +
+      nuevos.map(v => v.toFixed(2)).join('\n');
+  }
+  const adminEl = document.getElementById('yapesInput');
+  if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
+  _renderEmpYapesList();
+  saveStateNow();
+  return { nuevos, yaEstaban };
+}
+
+function _textoYapes({ nuevos, yaEstaban }) {
+  const total = round2(nuevos.reduce((t, v) => t + v, 0));
+  return `💚 ${nuevos.length === 1 ? 'Yape del grupo agregado' : nuevos.length + ' yapes del grupo agregados'} · S/. ${total.toFixed(2)}` +
+    (yaEstaban ? ` · ${yaEstaban} ya estaban` : '');
+}
+
+// Automático: escucha la lista de hoy mientras la caja de hoy está abierta
+let _yapesGrupoUnsub = null, _yapesGrupoLista = null;
+function _yapesGrupoAplicar() {
+  if (!_yapesGrupoLista || !state.cajaAbierta || !currentCajaId) return;
+  // Solo la caja abierta hoy (si hubiera dos, la del día)
+  const fecha = _todayPE();
+  const ap = state.aperturaFecha ? new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(state.aperturaFecha)) : '';
+  if (ap !== fecha) return;
+  const r = _mergeYapesGrupo(_yapesGrupoLista);
+  if (r.nuevos.length) showSyncToast(_textoYapes(r));
+}
+function _yapesGrupoListen() {
+  _yapesGrupoStop();
+  if (!currentCajaId) return;
+  _yapesGrupoUnsub = db.doc(`yapesGrupo/${_todayPE()}`).onSnapshot(snap => {
+    _yapesGrupoLista = snap.exists ? (snap.data().lista || []) : null;
+    _yapesGrupoAplicar();
+  }, err => console.warn('yapesGrupo:', err));
+}
+function _yapesGrupoStop() {
+  if (_yapesGrupoUnsub) { _yapesGrupoUnsub(); _yapesGrupoUnsub = null; }
+  _yapesGrupoLista = null;
+}
+// Cambio de día con la página abierta
+setInterval(() => { if (_yapesGrupoUnsub && currentCajaId) _yapesGrupoListen(); }, 30 * 60 * 1000);
+
+// Botón "💚 Yapes" (vistas de empleado y administrador): lo mismo, a pedido
 async function completarYapesDelDia(btn) {
   if (!currentCajaId) { showSyncToast('Abre una caja primero'); return; }
   if (btn) btn.disabled = true;
   try {
     const snap  = await db.doc(`yapesGrupo/${_todayPE()}`).get();
-    const lista = (snap.exists ? (snap.data().lista || []) : [])
-      .slice().sort((a, b) => String(a.hora).localeCompare(String(b.hora)));
+    const lista = snap.exists ? (snap.data().lista || []) : [];
     if (!lista.length) { showSyncToast('💚 Todavía no hay yapes del grupo hoy'); return; }
-
-    const cent = v => Math.round(parseFloat(v) * 100);
-    const ids  = new Set(state.yapesGrupoIds || []);
-    // Montos de la caja que no vienen de un mensaje ya cargado = escritos a mano
-    const aMano = new Map();
-    (state.yapesRaw || '').split('\n').forEach(x => {
-      const c = cent(x); if (!isNaN(c) && c > 0) aMano.set(c, (aMano.get(c) || 0) + 1);
-    });
-    lista.filter(y => ids.has(y.id)).forEach(y => {
-      const c = cent(y.monto); if (aMano.get(c) > 0) aMano.set(c, aMano.get(c) - 1);
-    });
-
-    const nuevos = [];
-    let yaEstaban = 0;
-    for (const y of lista) {
-      if (ids.has(y.id)) continue;
-      const c = cent(y.monto);
-      if (isNaN(c) || c <= 0) continue;
-      if (aMano.get(c) > 0) { aMano.set(c, aMano.get(c) - 1); yaEstaban++; }
-      else nuevos.push(c / 100);
-      ids.add(y.id);
-    }
-    state.yapesGrupoIds = [...ids];
-    if (nuevos.length) {
-      state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') +
-        nuevos.map(v => v.toFixed(2)).join('\n');
-    }
-    const adminEl = document.getElementById('yapesInput');
-    if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
-    _renderEmpYapesList();
-    saveStateNow();
-
-    const total = round2(nuevos.reduce((t, v) => t + v, 0));
-    showSyncToast(nuevos.length
-      ? `💚 ${nuevos.length} yape(s) agregado(s) · S/. ${total.toFixed(2)}` + (yaEstaban ? ` · ${yaEstaban} ya estaban` : '')
-      : '💚 Los yapes del grupo ya estaban todos');
+    const r = _mergeYapesGrupo(lista);
+    showSyncToast(r.nuevos.length ? _textoYapes(r) : '💚 Los yapes del grupo ya estaban todos');
   } catch (e) {
     console.warn('completarYapesDelDia:', e);
     showSyncToast('⚠ No se pudieron leer los yapes del grupo (' + (e.code || e.message) + ')');
@@ -1280,11 +1316,15 @@ function startRealtimeSync() {
     _applyRemoteState(remote);
     showSyncToast('🔄 Sincronizado');
     refreshCurrentView();
+    // Si otro dispositivo guardó sin un yape del grupo, se vuelve a poner
+    _yapesGrupoAplicar();
   }, err => console.warn('Sync error:', err));
+  _yapesGrupoListen();
 }
 
 function stopRealtimeSync() {
   if (_unsubscribeSync) { _unsubscribeSync(); _unsubscribeSync = null; }
+  _yapesGrupoStop();
 }
 
 function showSyncToast(msg) {

@@ -96,7 +96,7 @@ function iniciarYapes() {
     yapes = require('./grupo-yapes').crear({
       config: { ...AL, projectId: CONFIG.projectId }, log, baileys, logger, getSock: () => (listo ? sock : null),
     });
-  } catch (e) { log('Yapes automáticos desactivados:', e.message); yapes = { engancharSocket() {}, rellenar() {} }; }
+  } catch (e) { log('Yapes automáticos desactivados:', e.message); yapes = { engancharSocket() {} }; }
 }
 
 let sock = null;
@@ -264,8 +264,6 @@ if (vincular < 0) {
   udp.on('message', m => {
     let ev;
     try { ev = JSON.parse(m.toString()); } catch (e) { return; }
-    // Cargar a la caja los yapes de hoy que llegaron antes al grupo
-    if (ev.tipo === 'yapes-hoy') { if (yapes && yapes.rellenar) yapes.rellenar(); return; }
     const texto = mensaje(ev);
     if (!texto) return;
     log('Alerta:', texto.split('\n')[0]);

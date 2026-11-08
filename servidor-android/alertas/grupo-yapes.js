@@ -6,12 +6,11 @@
 //  1. Llega una foto al grupo "YAPES//TRANSFERENCIAS" (alertas.grupoYapes).
 //  2. El Claude Code del celular (`claude -p` en Debian, usa el plan del
 //     dueño, sin API) lee el monto del comprobante.
-//  3. El monto queda en la lista del día yapesGrupo/{fecha} (aunque no
-//     haya caja abierta) y se agrega al final de los Yapes de la caja
-//     abierta (cajas/{id}.yapesRaw, y su id en yapesGrupoIds), igual que si
-//     se escribiera a mano; la webapp se sincroniza sola. A la foto se le
-//     pone ✅. El botón "💚 Yapes" de la webapp completa desde esa lista
-//     lo que falte en la caja, sin duplicar.
+//  3. El monto queda en la lista del día yapesGrupo/{fecha} y a la foto se
+//     le pone ✅. La webapp (única que escribe la caja) lo agrega solo a
+//     los Yapes de la caja abierta de hoy, sin duplicar; el botón
+//     "💚 Yapes" hace lo mismo a pedido. Así el Samsung y la webapp no se
+//     pisan al guardar la caja.
 //  4. Si no se puede leer, el Samsung responde a la foto en el grupo
 //     pidiendo el monto como texto. Un mensaje que es SOLO un monto
 //     ("25.50", "S/ 25.50") también se agrega.
@@ -142,39 +141,6 @@ function crear({ config, log, baileys, logger, getSock }) {
     });
   }
 
-  // Agrega el monto a la caja abierta (si hubiera dos, la abierta hoy).
-  // Devuelve el nombre de la caja o null si no hay ninguna abierta.
-  async function agregarACaja(monto, id) {
-    const snap = await db.collection('cajas').where('cajaAbierta', '==', true).get();
-    const abiertas = snap.docs.filter(d => !d.data().eliminada);
-    if (!abiertas.length) return null;
-    const hoy = fechaPE(new Date());
-    const fechaDe = d => { const f = d.data().aperturaFecha; return f ? fechaPE(new Date(f)) : ''; };
-    abiertas.sort((a, b) => String(b.data().aperturaFecha || '').localeCompare(String(a.data().aperturaFecha || '')));
-    const caja = abiertas.find(d => fechaDe(d) === hoy) || abiertas[0];
-
-    await db.runTransaction(async tx => {
-      const s = await tx.get(caja.ref);
-      const c = s.data() || {};
-      let bref = null, b = null;
-      if (c.historialBorradorId) {
-        bref = db.doc(`historial/${c.historialBorradorId}`);
-        b = await tx.get(bref);
-      }
-      const ids = Array.isArray(c.yapesGrupoIds) ? c.yapesGrupoIds : [];
-      if (ids.includes(id)) return;   // ya lo agregó el botón de la webapp
-      const raw = (typeof c.yapesRaw === 'string' && c.yapesRaw.trim() ? c.yapesRaw.trimEnd() + '\n' : '') + monto.toFixed(2);
-      // _ts más nuevo: la webapp lo toma como cambio remoto y lo muestra
-      tx.update(caja.ref, { yapesRaw: raw, yapesGrupoIds: [...ids, id], _ts: Date.now() });
-      // El borrador del historial también lleva los Yapes y su total
-      if (b && b.exists && b.data().estado !== 'cerrado') {
-        const total = raw.split('\n').reduce((t, x) => { const v = parseFloat(x); return t + (isNaN(v) || v < 0 ? 0 : v); }, 0);
-        tx.update(bref, { yapesRaw: raw, totalYapes: Math.round(total * 100) / 100 });
-      }
-    });
-    return caja.data().nombre || caja.id;
-  }
-
   // ── ¿Es el grupo de Yapes? (se pregunta el nombre una vez por grupo) ──
   const esYapes = new Map();   // jid → Promise<boolean>
   function esGrupoYapes(jid) {
@@ -216,34 +182,23 @@ function crear({ config, log, baileys, logger, getSock }) {
     }, { merge: true });
   }
 
+  // Guarda el monto en la lista del día; la webapp lo pasa a la caja
   async function sumar(m, monto, origen) {
-    if (!db) {
-      log(`Yapes: S/ ${monto.toFixed(2)} sin conexión a Firebase`);
+    try {
+      if (!db) throw new Error('sin conexión a Firebase');
+      await registrarDelDia(m, monto, origen);
+    } catch (e) {
+      log(`Yapes: no se pudo guardar S/ ${monto.toFixed(2)}:`, e.message);
       await responder(m, `⚠️ No pude registrar S/ ${monto.toFixed(2)}. Agrégalo a mano.`);
       return 0;
     }
-    try { await registrarDelDia(m, monto, origen); }
-    catch (e) { log('Yapes: no se pudo guardar en la lista del día:', e.message); }
-    let caja;
-    try { caja = await agregarACaja(monto, m.key.id); }
-    catch (e) {
-      log(`Yapes: no se pudo agregar S/ ${monto.toFixed(2)}:`, e.message);
-      await responder(m, `⚠️ No pude agregar S/ ${monto.toFixed(2)} a la caja. Agrégalo a mano.`);
-      return 0;
-    }
-    if (!caja) {
-      log(`Yapes: S/ ${monto.toFixed(2)} (${origen}) sin caja abierta`);
-      await reaccionar(m, '📝');
-      await responder(m, `📝 S/ ${monto.toFixed(2)} guardado. No hay caja abierta: al abrirla, toca "💚 Yapes" para cargarlo.`);
-      return 0;
-    }
-    log(`Yapes: + S/ ${monto.toFixed(2)} (${origen}) → ${caja}`);
+    log(`Yapes: + S/ ${monto.toFixed(2)} (${origen}) en la lista del día`);
     await reaccionar(m, '✅');
     return monto;
   }
 
   // ── Mensajes del grupo ──────────────────────────────────────────────
-  async function procesar(m, rellenando = false) {
+  async function procesar(m) {
     const jid = m.key && m.key.remoteJid;
     if (!jid || !jid.endsWith('@g.us') || !m.key.id || vistos.has(m.key.id)) return;
     let si;
@@ -255,7 +210,7 @@ function crear({ config, log, baileys, logger, getSock }) {
       return;
     }
     const ts = Number(m.messageTimestamp || 0) * 1000;
-    if (!rellenando && ts && Date.now() - ts > MAX_EDAD_MS) return;
+    if (ts && Date.now() - ts > MAX_EDAD_MS) return;
     const c = normalizeMessageContent(m.message) || {};
 
     // Texto que es solo un monto
@@ -293,72 +248,6 @@ function crear({ config, log, baileys, logger, getSock }) {
     return sumar(m, monto, 'foto');
   }
 
-  // ── Relleno: los yapes de HOY que llegaron antes (historial) ─────────
-  //  WhatsApp solo entrega mensajes nuevos al dispositivo vinculado; los
-  //  anteriores se piden al WhatsApp principal (el del mismo Samsung)
-  //  tomando como punto de partida un mensaje que se manda al grupo.
-  function pedirHistorial(sock, jid, key, tsMs) {
-    return new Promise(resolve => {
-      const lote = [];
-      let fin = setTimeout(listo, 45e3);
-      function listo() { clearTimeout(fin); sock.ev.off('messaging-history.set', alLlegar); resolve(lote); }
-      function alLlegar({ messages }) {
-        const deGrupo = (messages || []).filter(x => x.key && x.key.remoteJid === jid);
-        if (!deGrupo.length) return;
-        lote.push(...deGrupo);
-        clearTimeout(fin); fin = setTimeout(listo, 5e3);   // por si llega en partes
-      }
-      sock.ev.on('messaging-history.set', alLlegar);
-      sock.fetchMessageHistory(50, key, tsMs).catch(e => { log('Yapes: historial:', e.message); listo(); });
-    });
-  }
-
-  let rellenandoAhora = false;
-  async function rellenarHoy() {
-    if (rellenandoAhora) return;
-    rellenandoAhora = true;
-    try {
-      const sock = getSock();
-      if (!sock) throw new Error('WhatsApp sin conexión');
-      const grupos = await sock.groupFetchAllParticipating();
-      const g = Object.values(grupos).find(x => normalizar(x.subject) === NOMBRE_GRUPO);
-      if (!g) throw new Error('no encontré el grupo');
-      esYapes.set(g.id, Promise.resolve(true));
-      const hoy = fechaPE(new Date());
-      const ancla = await sock.sendMessage(g.id, { text: '⏳ Cargando los yapes de hoy…' });
-      marcar(ancla.key.id);
-      let key = ancla.key, tsMs = Number(ancla.messageTimestamp) * 1000;
-      const encontrados = new Map();
-      for (let pag = 0; pag < 10; pag++) {
-        const lote = await pedirHistorial(sock, g.id, key, tsMs);
-        const nuevos = lote.filter(x => !encontrados.has(x.key.id));
-        if (!nuevos.length) break;
-        nuevos.forEach(x => encontrados.set(x.key.id, x));
-        const viejo = nuevos.reduce((a, x) => Number(x.messageTimestamp) < Number(a.messageTimestamp) ? x : a);
-        if (fechaPE(new Date(Number(viejo.messageTimestamp) * 1000)) < hoy) break;
-        key = viejo.key; tsMs = Number(viejo.messageTimestamp) * 1000;
-      }
-      const deHoy = [...encontrados.values()]
-        .filter(x => fechaPE(new Date(Number(x.messageTimestamp) * 1000)) === hoy)
-        .sort((a, b) => Number(a.messageTimestamp) - Number(b.messageTimestamp));
-      log(`Yapes: relleno de hoy — ${encontrados.size} mensaje(s) recibidos del historial, ${deHoy.length} de hoy`);
-      let n = 0, total = 0;
-      for (const m of deHoy) {
-        const monto = await procesar(m, true).catch(e => { log('Yapes: relleno:', e.message); return 0; });
-        if (monto > 0) { n++; total += monto; }
-      }
-      const resumen = n
-        ? `✅ Listo: ${n} yape(s) de hoy agregados a la caja (total S/ ${total.toFixed(2)}).`
-        : '✅ Listo: no encontré yapes nuevos de hoy para agregar.';
-      log('Yapes:', resumen);
-      await sock.sendMessage(g.id, { text: resumen }).then(m => marcar(m.key.id)).catch(() => {});
-    } catch (e) {
-      log('Yapes: no se pudo rellenar hoy:', e.message);
-    } finally {
-      rellenandoAhora = false;
-    }
-  }
-
   // Un mensaje a la vez: dos yapes seguidos no se pisan al escribir la caja
   let fila = Promise.resolve();
   function engancharSocket(sock) {
@@ -371,9 +260,7 @@ function crear({ config, log, baileys, logger, getSock }) {
 
   arrancarFirebase();
   log(`Yapes automáticos activos (grupo "${config.grupoYapes || 'YAPES//TRANSFERENCIAS'}", lee con Claude Code${DEBIAN ? ' de Debian' : ''})`);
-  function rellenar() { fila = fila.then(rellenarHoy); return fila; }
-
-  return { engancharSocket, rellenar };
+  return { engancharSocket };
 }
 
 module.exports = { crear };
