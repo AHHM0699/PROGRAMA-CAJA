@@ -319,47 +319,93 @@ function _applyRoleUI() {
 // ── Yapes del grupo de WhatsApp YAPES//TRANSFERENCIAS ─────────────────
 //  El Samsung (servidor-android/alertas/grupo-yapes.js) lee el monto de cada
 //  foto del grupo y lo guarda en yapesGrupo/{fecha}.lista ({ id, monto,
-//  hora, origen }). SOLO la webapp escribe los Yapes de la caja: mientras
-//  la caja de hoy está abierta en pantalla, cada yape nuevo de la lista se
-//  agrega solo; el botón "💚 Yapes" hace lo mismo a pedido. Sin duplicar:
-//   - los ya cargados se reconocen por su id (state.yapesGrupoIds);
-//   - los escritos a mano se reconocen por el monto: si en la caja hay un
-//     monto igual que no viene del grupo, se da por ya registrado.
-function _mergeYapesGrupo(lista) {
-  lista = (lista || []).slice().sort((a, b) => String(a.hora).localeCompare(String(b.hora)));
+//  hora, origen }). SOLO la webapp escribe los Yapes de la caja, y lo hace
+//  con una transacción sobre lo que hay en el servidor (no sobre la copia
+//  local, que puede estar vieja).
+//   - Automático (caja de hoy abierta en pantalla): agrega los yapes del
+//     grupo que aún no se cargaron (por id). Si alguien borra uno a mano,
+//     no lo vuelve a poner.
+//   - Botón "💚 Yapes": asegura que estén TODOS los del grupo, por monto:
+//     si en el grupo hay dos de S/ 16 y en la caja uno, agrega el que falta
+//     (aunque se haya borrado). Lo escrito a mano cuenta como ya registrado.
+
+// Cálculo puro: dado lo que hay en la caja (raw, ids) y la lista del grupo,
+// devuelve la caja nueva y qué se agregó.
+function _calcMergeYapes(raw, idsArr, lista, porMonto) {
+  lista = (lista || []).filter(y => y && y.id).slice()
+    .sort((a, b) => String(a.hora).localeCompare(String(b.hora)));
   const cent = v => Math.round(parseFloat(v) * 100);
-  const ids  = new Set(state.yapesGrupoIds || []);
-  // Montos de la caja que no vienen de un mensaje ya cargado = escritos a mano
-  const aMano = new Map();
-  (state.yapesRaw || '').split('\n').forEach(x => {
-    const c = cent(x); if (!isNaN(c) && c > 0) aMano.set(c, (aMano.get(c) || 0) + 1);
+  const ids  = new Set(idsArr || []);
+  const enCaja = new Map();   // monto (centavos) → cuántas veces está en la caja
+  (raw || '').split('\n').forEach(x => {
+    const c = cent(x); if (!isNaN(c) && c > 0) enCaja.set(c, (enCaja.get(c) || 0) + 1);
   });
-  lista.filter(y => ids.has(y.id)).forEach(y => {
-    const c = cent(y.monto); if (aMano.get(c) > 0) aMano.set(c, aMano.get(c) - 1);
-  });
+  const quitar = (m, c) => { if (m.get(c) > 0) { m.set(c, m.get(c) - 1); return true; } return false; };
 
   const nuevos = [];
   let yaEstaban = 0, cambio = false;
-  for (const y of lista) {
-    if (!y || !y.id || ids.has(y.id)) continue;
-    const c = cent(y.monto);
-    if (isNaN(c) || c <= 0) continue;
-    if (aMano.get(c) > 0) { aMano.set(c, aMano.get(c) - 1); yaEstaban++; }
-    else nuevos.push(c / 100);
-    ids.add(y.id); cambio = true;
+  if (porMonto) {
+    for (const y of lista) {
+      const c = cent(y.monto);
+      if (isNaN(c) || c <= 0) continue;
+      if (!quitar(enCaja, c)) nuevos.push(c / 100);
+      else if (!ids.has(y.id)) yaEstaban++;
+      if (!ids.has(y.id)) { ids.add(y.id); cambio = true; }
+    }
+  } else {
+    // Montos de la caja que no vienen de un mensaje ya cargado = escritos a mano
+    lista.filter(y => ids.has(y.id)).forEach(y => quitar(enCaja, cent(y.monto)));
+    for (const y of lista) {
+      if (ids.has(y.id)) continue;
+      const c = cent(y.monto);
+      if (isNaN(c) || c <= 0) continue;
+      if (quitar(enCaja, c)) yaEstaban++;
+      else nuevos.push(c / 100);
+      ids.add(y.id); cambio = true;
+    }
   }
-  if (!cambio) return { nuevos, yaEstaban };
-
-  state.yapesGrupoIds = [...ids];
   if (nuevos.length) {
-    state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') +
-      nuevos.map(v => v.toFixed(2)).join('\n');
+    raw = (raw && raw.trim() ? raw.trimEnd() + '\n' : '') + nuevos.map(v => v.toFixed(2)).join('\n');
+    cambio = true;
   }
+  return { raw, ids: [...ids], nuevos, yaEstaban, cambio };
+}
+
+// Aplica un cambio de Yapes con transacción sobre el servidor y actualiza la pantalla.
+// calc(raw, ids) → { raw, ids, cambio, ... }. Sin conexión, cae a la copia local.
+async function _cambiarYapesCaja(calc) {
+  const ref = cajaRef();
+  let r;
+  try {
+    r = await db.runTransaction(async tx => {
+      const s = await tx.get(ref);
+      if (!s.exists) throw new Error('la caja ya no existe');
+      const d = s.data();
+      const res = calc(typeof d.yapesRaw === 'string' ? d.yapesRaw : '', d.yapesGrupoIds || []);
+      if (res.cambio) tx.update(ref, { yapesRaw: res.raw, yapesGrupoIds: res.ids, _ts: Date.now() });
+      return res;
+    });
+  } catch (e) {
+    if (e && e.message === 'la caja ya no existe') throw e;
+    console.warn('Yapes sin transacción (¿sin conexión?):', e);
+    r = calc(state.yapesRaw || '', state.yapesGrupoIds || []);
+    if (r.cambio) { state.yapesRaw = r.raw; state.yapesGrupoIds = r.ids; }
+    _refrescarYapesDom();
+    saveStateNow();
+    return r;
+  }
+  if (ref.id !== currentCajaId) return r;
+  // Lo escrito es ahora lo del servidor (no hace falta volver a guardarlo)
+  state.yapesRaw = r.raw; state.yapesGrupoIds = r.ids;
+  _synced.yapesRaw = _json(r.raw); _synced.yapesGrupoIds = _json(r.ids);
+  _refrescarYapesDom();
+  if (r.cambio) _syncBorrador();
+  return r;
+}
+function _refrescarYapesDom() {
   const adminEl = document.getElementById('yapesInput');
-  if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
+  if (adminEl && adminEl.value !== state.yapesRaw) { adminEl.value = state.yapesRaw; onYapesInput(); }
   _renderEmpYapesList();
-  saveStateNow();
-  return { nuevos, yaEstaban };
 }
 
 function _textoYapes({ nuevos, yaEstaban }) {
@@ -369,15 +415,23 @@ function _textoYapes({ nuevos, yaEstaban }) {
 }
 
 // Automático: escucha la lista de hoy mientras la caja de hoy está abierta
-let _yapesGrupoUnsub = null, _yapesGrupoLista = null;
-function _yapesGrupoAplicar() {
-  if (!_yapesGrupoLista || !state.cajaAbierta || !currentCajaId) return;
+let _yapesGrupoUnsub = null, _yapesGrupoLista = null, _yapesGrupoOcupado = false;
+async function _yapesGrupoAplicar() {
+  if (!_yapesGrupoLista || !state.cajaAbierta || !currentCajaId || !_cajaCargada) return;
   // Solo la caja abierta hoy (si hubiera dos, la del día)
   const fecha = _todayPE();
   const ap = state.aperturaFecha ? new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(state.aperturaFecha)) : '';
   if (ap !== fecha) return;
-  const r = _mergeYapesGrupo(_yapesGrupoLista);
-  if (r.nuevos.length) showSyncToast(_textoYapes(r));
+  // Sin trabajo pendiente según la copia local: no tocar el servidor
+  if (!_calcMergeYapes(state.yapesRaw, state.yapesGrupoIds, _yapesGrupoLista, false).cambio) return;
+  if (_yapesGrupoOcupado) return;
+  _yapesGrupoOcupado = true;
+  try {
+    const lista = _yapesGrupoLista;
+    const r = await _cambiarYapesCaja((raw, ids) => _calcMergeYapes(raw, ids, lista, false));
+    if (r.nuevos.length) showSyncToast(_textoYapes(r));
+  } catch (e) { console.warn('Yapes del grupo:', e); }
+  finally { _yapesGrupoOcupado = false; }
 }
 function _yapesGrupoListen() {
   _yapesGrupoStop();
@@ -402,7 +456,7 @@ async function completarYapesDelDia(btn) {
     const snap  = await db.doc(`yapesGrupo/${_todayPE()}`).get();
     const lista = snap.exists ? (snap.data().lista || []) : [];
     if (!lista.length) { showSyncToast('💚 Todavía no hay yapes del grupo hoy'); return; }
-    const r = _mergeYapesGrupo(lista);
+    const r = await _cambiarYapesCaja((raw, ids) => _calcMergeYapes(raw, ids, lista, true));
     showSyncToast(r.nuevos.length ? _textoYapes(r) : '💚 Los yapes del grupo ya estaban todos');
   } catch (e) {
     console.warn('completarYapesDelDia:', e);
@@ -1034,6 +1088,15 @@ function _renderAperturasCaja() {
   if (emp) emp.innerHTML = lista.length === 0 ? '' : html;
 }
 
+// Agrega un yape escrito a mano sobre lo que hay en el servidor (no pisa
+// los que se agregaron en otro dispositivo o desde el grupo).
+function _agregarYapeManual(v) {
+  return _cambiarYapesCaja((raw, ids) => ({
+    raw: (raw && raw.trim() ? raw.trimEnd() + '\n' : '') + v.toFixed(2),
+    ids, cambio: true,
+  })).catch(e => { console.warn('Yape manual:', e); showSyncToast('⚠ No se pudo registrar el yape'); });
+}
+
 function addEmpYape() {
   const input    = _el('empYapeInput');
   const feedback = _el('empYapeFeedback');
@@ -1041,14 +1104,10 @@ function addEmpYape() {
   const v = round2(parseFloat(input.value));
   if (isNaN(v) || v <= 0) { input.focus(); return; }
 
-  state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') + v.toFixed(2);
-  const adminEl  = document.getElementById('yapesInput');
-  if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
+  _agregarYapeManual(v);
 
   input.value = '';
   input.focus();
-  saveState();
-  _renderEmpYapesList();
 
   if (feedback) {
     feedback.textContent = `✓ S/. ${v.toFixed(2)} registrado`;
@@ -1112,11 +1171,7 @@ async function openYapeWidget() {
   function pipAdd() {
     const v = round2(parseFloat(pipInput.value));
     if (isNaN(v) || v <= 0) { pipInput.focus(); return; }
-    state.yapesRaw = (state.yapesRaw ? state.yapesRaw.trimEnd() + '\n' : '') + v.toFixed(2);
-    const adminEl  = document.getElementById('yapesInput');
-    if (adminEl) { adminEl.value = state.yapesRaw; onYapesInput(); }
-    saveState();
-    _renderEmpYapesList();
+    _agregarYapeManual(v);
     pipInput.value = '';
     pipInput.focus();
     pipOk.textContent = '✓';
@@ -1252,30 +1307,79 @@ async function _syncBorrador() {
 }
 // ---- fin borrador helpers ----
 
-function saveStateNow() {
-  if (!currentCajaId) return;
-  clearTimeout(_estadoPushTimer);
+// ── Guardado por campos ──────────────────────────────────────────────
+//  La caja suele estar abierta en varios dispositivos a la vez. Antes cada
+//  uno guardaba la caja COMPLETA (incluso al pasar a segundo plano sin
+//  cambios), y un dispositivo con datos viejos pisaba lo hecho en otro, o
+//  volvía a crear una caja ya cerrada. Ahora:
+//   - _synced guarda el último valor conocido en el servidor de cada campo;
+//   - al guardar se envían SOLO los campos cambiados en este dispositivo
+//     (si no cambió nada, no se escribe nada);
+//   - se usa update(): si la caja ya no existe (cerrada), falla en vez de
+//     recrearla.
+let _synced = {};          // campo → valor en el servidor (JSON estable)
+let _cajaCargada = false;  // no guardar nada hasta haber leído la caja
+
+function _json(v) {   // JSON con claves ordenadas (Firestore no garantiza el orden de los mapas)
+  if (v === undefined) v = null;
+  if (Array.isArray(v)) return '[' + v.map(_json).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _json(v[k])).join(',') + '}';
+  return JSON.stringify(v);
+}
+function _marcarSincronizado(doc) {
+  STATE_FIELDS.forEach(k => {
+    if (k !== '_ts' && Object.prototype.hasOwnProperty.call(doc, k)) _synced[k] = _json(doc[k]);
+  });
+}
+function _camposCambiados() {
+  const out = {};
+  STATE_FIELDS.forEach(k => {
+    if (k === '_ts') return;
+    const v = state[k] !== undefined ? state[k] : null;
+    if (_json(v) !== _synced[k]) out[k] = v;
+  });
+  return out;
+}
+function _pushEstado() {
+  if (!currentCajaId || !_cajaCargada) return;
+  const cambios = _camposCambiados();
+  if (!Object.keys(cambios).length) return;   // nada propio que guardar: no pisa a nadie
   state._ts = Date.now();
-  cajaRef().set(_stateToDoc()).catch(e => console.warn('saveStateNow error:', e));
+  const ref = cajaRef();
+  const enviados = {};
+  Object.keys(cambios).forEach(k => { enviados[k] = _json(cambios[k]); });
+  ref.update({ ...cambios, _ts: state._ts })
+    .then(() => {
+      if (ref.id !== currentCajaId) return;
+      // Solo se marca si nadie lo cambió mientras viajaba
+      Object.keys(enviados).forEach(k => { if (_json(state[k]) === enviados[k]) _synced[k] = enviados[k]; });
+    })
+    .catch(e => console.warn('No se pudo guardar la caja:', e.code || e));
   _syncBorrador();
+}
+
+function saveStateNow() {
+  clearTimeout(_estadoPushTimer);
+  _pushEstado();
 }
 
 function saveState() {
   if (!currentCajaId) return;
-  state._ts = Date.now();
   clearTimeout(_estadoPushTimer);
-  _estadoPushTimer = setTimeout(() => {
-    if (!currentCajaId) return;  // guard: caja puede haberse cerrado durante el delay
-    cajaRef().set(_stateToDoc()).catch(e => console.warn('saveState error:', e));
-    _syncBorrador();
-  }, 1200);
+  _estadoPushTimer = setTimeout(_pushEstado, 1200);
 }
 
 async function _loadStateFromFirestore() {
+  _synced = {};
+  _cajaCargada = false;
   if (!currentCajaId) return;
   try {
     const snap = await cajaRef().get();
-    if (snap.exists) _applyRemoteState(snap.data());
+    if (snap.exists) {
+      _applyRemoteState(snap.data());
+      _marcarSincronizado(snap.data());
+      _cajaCargada = true;
+    }
   } catch (e) { console.warn('Error cargando caja:', e); }
 }
 
@@ -1288,13 +1392,38 @@ function _applyRemoteState(remote) {
   if (!Array.isArray(state.yapesGrupoIds)) state.yapesGrupoIds = [];
 
   if (state.cajaAbierta) {
-    setMode('inicial', state.inicialMode || 'monto');
-    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-    set('cajaInicialExacto', state.cajaInicial      || 0);
-    set('ventasHastaAhora',  state.ventasHastaAhora || 0);
-    set('ultimoYape',        state.ultimoYape        || 0);
-    set('yapesInput',        state.yapesRaw);
+    const has = k => Object.prototype.hasOwnProperty.call(remote, k);
+    if (has('inicialMode')) setMode('inicial', state.inicialMode || 'monto');
+    const set = (k, id, v) => { if (!has(k)) return; const el = document.getElementById(id); if (el) el.value = v; };
+    set('cajaInicial',      'cajaInicialExacto', state.cajaInicial      || 0);
+    set('ventasHastaAhora', 'ventasHastaAhora',  state.ventasHastaAhora || 0);
+    set('ultimoYape',       'ultimoYape',        state.ultimoYape        || 0);
+    set('yapesRaw',         'yapesInput',        state.yapesRaw);
   }
+}
+
+// Aplica cada campo que cambió en el servidor. Si este dispositivo también lo
+// cambió y aún no lo guardó, se conserva lo local (y se guarda enseguida).
+// Devuelve true si cambió algo en pantalla.
+function _aplicarRemotoPorCampos(remote) {
+  const aplicar = {};
+  let pendiente = false;
+  STATE_FIELDS.forEach(k => {
+    if (k === '_ts' || !Object.prototype.hasOwnProperty.call(remote, k)) return;
+    const r = _json(remote[k]);
+    if (r === _synced[k]) return;
+    const local = _json(state[k]);
+    const cambiadoAqui = _synced[k] !== undefined && local !== _synced[k];
+    _synced[k] = r;
+    if (local === r) return;
+    if (cambiadoAqui) { pendiente = true; return; }
+    aplicar[k] = remote[k];
+  });
+  _cajaCargada = true;
+  if (pendiente) saveState();
+  if (!Object.keys(aplicar).length) return false;
+  _applyRemoteState(aplicar);
+  return true;
 }
 
 function startRealtimeSync() {
@@ -1311,9 +1440,8 @@ function startRealtimeSync() {
       setTimeout(() => showCajaSelector(), 2000);
       return;
     }
-    const remote = snap.data();
-    if ((remote._ts || 0) <= (state._ts || 0)) return;
-    _applyRemoteState(remote);
+    if (snap.metadata.hasPendingWrites) return;   // eco de lo que este dispositivo acaba de guardar
+    if (!_aplicarRemotoPorCampos(snap.data())) return;
     showSyncToast('🔄 Sincronizado');
     refreshCurrentView();
     // Si otro dispositivo guardó sin un yape del grupo, se vuelve a poner
@@ -1457,7 +1585,11 @@ function guardarApertura() {
   const borradorRef = historialCol.doc();
   state.historialBorradorId = borradorRef.id;
 
-  newRef.set(_stateToDoc()).catch(e => console.error('Error creando caja:', e));
+  const docNuevo = _stateToDoc();
+  _synced = {};
+  _marcarSincronizado(docNuevo);
+  _cajaCargada = true;
+  newRef.set(docNuevo).catch(e => console.error('Error creando caja:', e));
   borradorRef.set(_buildBorradorDoc()).catch(e => console.warn('Error creando borrador:', e));
 
   startRealtimeSync();
@@ -2895,8 +3027,7 @@ async function refreshAperturasEmp() {
   try {
     const snap = await cajaRef().get();
     if (snap.exists) {
-      const remote = snap.data();
-      if ((remote._ts || 0) > (state._ts || 0)) _applyRemoteState(remote);
+      if (_aplicarRemotoPorCampos(snap.data())) refreshCurrentView();
     }
   } catch(e) { console.warn('refresh aperturas:', e); }
   _rcRenderAperturasEmp();
