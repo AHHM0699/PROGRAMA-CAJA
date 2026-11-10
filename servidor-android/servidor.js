@@ -11,6 +11,8 @@
 //     registrada y se clasifica según su causa:
 //        impresion      → un trabajo pasó por el proxy justo antes
 //        boton          → orden de la webapp (gavetaComandos)
+//        llave-admin    → orden directa desde el celular del dueño
+//                          (config llaveAdmin: "Llave virtual de administrador")
 //        no-autorizada  → nada la explica (llave, u otro dispositivo)
 //  2. Proxy de impresión: RawBT y los demás celulares imprimen a
 //     IP_DEL_SAMSUNG:9100; los trabajos se encolan y se reenvían por la
@@ -56,6 +58,14 @@ const DATA_DIR     = path.join(__dirname, 'data');
 const CMD_GAVETA   = Buffer.from([0x1b, 0x70, 0x00, 0x19, 0xfa]);  // ESC p 0 25 250
 const CMD_ASB_ON   = Buffer.from([0x1d, 0x61, 0x0f]);              // GS a 15
 const CMD_ESTADO   = Buffer.from([0x10, 0x04, 0x01]);              // DLE EOT 1
+
+// Llave virtual de administrador: la orden directa de gaveta (sin imprimir)
+// que llega desde estos dispositivos es del dueño y queda justificada.
+// config.json → "llaveAdmin": { "nombre": "Abdon", "ips": ["192.168.1.3"] }
+// (Android no deja ver la MAC: conviene reservar esa IP en el router.)
+const LLAVE_ADMIN = CONFIG.llaveAdmin && Array.isArray(CONFIG.llaveAdmin.ips) ? CONFIG.llaveAdmin : null;
+function esLlaveAdmin(origen) { return !!(LLAVE_ADMIN && LLAVE_ADMIN.ips.includes(origen)); }
+const MOTIVO_LLAVE = `Llave virtual de administrador${LLAVE_ADMIN && LLAVE_ADMIN.nombre ? ' (' + LLAVE_ADMIN.nombre + ')' : ''}`;
 
 // Ventana para atribuir una apertura a su causa
 const VENTANA_CAUSA_MS = 6000;
@@ -130,6 +140,7 @@ let fallosSeguidos = 0;
 let recibioDatos   = false;   // la conexión actual ya recibió algo de la impresora
 let trabajoActual  = null;    // { tipo:'impresion', origen } mientras un trabajo pasa por el proxy
 let causaApertura  = null;    // causa fijada en el momento en que se abrió la gaveta
+let ultimaApertura = null;    // { entry, causa } la última apertura anotada (para corregirla)
 
 function conectarImpresora() {
   impresora = net.createConnection({ host: PRINTER_HOST, port: PRINTER_PORT });
@@ -209,6 +220,20 @@ function enviarAImpresora(data) {
   impresora.write(data);
 }
 
+// Corrige una entrada ya anotada (local y Firestore) buscándola por su iso
+function corregir(tipo, iso, cambios) {
+  const fecha = fechaPE(new Date(iso));
+  const lista = leer(tipo, fecha);
+  const e = lista.find(x => x.iso === iso);
+  if (!e) return;
+  Object.assign(e, cambios);
+  fs.writeFileSync(archivo(tipo, fecha), JSON.stringify(lista, null, 1));
+  if (db) {
+    db.doc(`${tipo}/${fecha}`).set({ lista }, { merge: true })
+      .catch(err => log(`No se pudo corregir ${tipo}:`, err.message));
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  SENSOR DE GAVETA Y CLASIFICACIÓN
 // ════════════════════════════════════════════════════════════════════
@@ -251,6 +276,7 @@ function actualizarGaveta(abierta, fuente) {
     // quedó abierta varios minutos ya no encuentra su orden.
     // Abierta mientras un trabajo pasa por el proxy: la causa es ese trabajo.
     causaApertura = trabajoActual || buscarCausa(aperturaDesde.getTime());
+    if (causaApertura && causaApertura === trabajoActual) trabajoActual.abrioGaveta = true;
     log(`Gaveta ABIERTA (${fuente})`);
     avisarCamara({ tipo: 'apertura', causa: causaApertura ? causaApertura.tipo : 'no-autorizada',
                    motivo: causaApertura && causaApertura.motivo, origen: causaApertura && causaApertura.origen });
@@ -273,6 +299,7 @@ function actualizarGaveta(abierta, fuente) {
   if (causa && causa.motivo) entry.motivo = causa.motivo;
   if (causa && causa.origen) entry.origen = causa.origen;
   anotar('aperturasFisicas', entry);
+  ultimaApertura = { entry, causa };
   log(`Gaveta cerrada — abierta ${entry.segundos}s desde ${entry.hora} → ${entry.causa}` +
       (entry.motivo ? ` (${entry.motivo})` : '') + (entry.origen ? ` [${entry.origen}]` : ''));
 }
@@ -304,6 +331,7 @@ function procesarCola() {
   let bytes = 0;
   let traeGaveta = false;     // el trabajo ya incluye ESC p
   let previo = -1;            // último byte del chunk anterior (ESC p partido en dos)
+  let muestra = Buffer.alloc(0);   // primeros bytes (para ver qué manda una orden directa)
   // La gaveta se abre MIENTRAS se imprime: la causa se anota al empezar
   trabajoActual = { tipo: 'impresion', origen, ts: Date.now() };
   avisarCamara({ tipo: 'impresion', origen });
@@ -318,10 +346,25 @@ function procesarCola() {
     // Solo la orden de gaveta, sin nada impreso (p. ej. el botón "abrir
     // cajón" de RawBT): se abrió la caja sin comprobante.
     if (bytes < (CONFIG.minBytesImpresion || 32) && traeGaveta) {
-      trabajo.tipo = 'gaveta-directa';
-      anotar('impresiones', { hora: horaPE(inicio), iso: inicio.toISOString(), origen, bytes, gaveta: 'directa sin impresion' });
-      log(`Orden de gaveta DIRECTA desde ${origen} sin imprimir nada`);
-      avisarCamara({ tipo: 'gaveta-directa', origen });
+      const admin = esLlaveAdmin(origen);
+      trabajo.tipo = admin ? 'llave-admin' : 'gaveta-directa';
+      if (admin) trabajo.motivo = MOTIVO_LLAVE;
+      anotar('impresiones', { hora: horaPE(inicio), iso: inicio.toISOString(), origen, bytes,
+        gaveta: admin ? 'llave admin' : 'directa sin impresion', hex: muestra.toString('hex') });
+      log(admin ? `🔑 ${MOTIVO_LLAVE} desde ${origen}` : `Orden de gaveta DIRECTA desde ${origen} sin imprimir nada`);
+      avisarCamara({ tipo: 'gaveta-directa', origen, llaveAdmin: admin ? (LLAVE_ADMIN.nombre || 'administrador') : undefined });
+      // La orden terminó de llegar antes de que la impresora avisara la
+      // apertura: se deja anotada para la apertura de los próximos segundos.
+      if (!trabajo.abrioGaveta) anotarCausa({ tipo: trabajo.tipo, origen, motivo: trabajo.motivo });
+      // La gaveta pudo abrirse y cerrarse ANTES de que terminara de llegar la
+      // orden: esa apertura ya quedó anotada como "impresion"; se corrige.
+      if (ultimaApertura && ultimaApertura.causa === trabajo && ultimaApertura.entry.causa !== trabajo.tipo) {
+        const cambios = { causa: trabajo.tipo };
+        if (trabajo.motivo) cambios.motivo = trabajo.motivo;
+        corregir('aperturasFisicas', ultimaApertura.entry.iso, cambios);
+        Object.assign(ultimaApertura.entry, cambios);
+        log(`Apertura de las ${ultimaApertura.entry.hora} corregida → ${trabajo.tipo}`);
+      }
     }
     if (bytes >= (CONFIG.minBytesImpresion || 32)) {
       let gaveta = traeGaveta ? 'propia' : 'no';
@@ -334,6 +377,7 @@ function procesarCola() {
       }
       anotar('impresiones', { hora: horaPE(inicio), iso: inicio.toISOString(), origen, bytes, gaveta });
       log(`Impresión de ${origen} (${bytes} bytes) — orden de gaveta: ${gaveta}`);
+      if (traeGaveta && !trabajo.abrioGaveta) anotarCausa({ tipo: 'impresion', origen });
     }
     // RawBT puede mandar ESC @ o desactivar el ASB: se vuelve a activar
     if (conectada) impresora.write(CMD_ASB_ON);
@@ -342,6 +386,7 @@ function procesarCola() {
 
   cliente.on('data', chunk => {
     bytes += chunk.length;
+    if (muestra.length < 64) muestra = Buffer.concat([muestra, chunk]).subarray(0, 64);
     if (!traeGaveta) {
       if (previo === 0x1b && chunk[0] === 0x70) traeGaveta = true;
       for (let i = 0; i < chunk.length - 1 && !traeGaveta; i++) {
@@ -453,6 +498,10 @@ async function timesDelDia(fecha) {
   // Las "reconexion" no se vieron abrirse: no cuentan como apertura
   return lista.filter(e => e.causa !== 'reconexion').map(e => e.hora).sort();
 }
+// Horas de las aperturas hechas con la llave virtual de administrador
+function llaveAdminDelDia(fecha) {
+  return leer('aperturasFisicas', fecha).filter(e => e.causa === 'llave-admin').map(e => e.hora).sort();
+}
 
 function escucharReporte() {
   db.doc('requests/reporte-caja').onSnapshot(async snap => {
@@ -481,7 +530,7 @@ function escucharReporte() {
         }
       }
       await db.doc(`reporteCaja/${fecha}`).set({
-        fecha, times, updatedAt: FieldValue.serverTimestamp(), origen: 'android'
+        fecha, times, llaveAdmin: llaveAdminDelDia(fecha), updatedAt: FieldValue.serverTimestamp(), origen: 'android'
       });
       await snap.ref.update({ status: 'done' });
       log(`Reporte de caja ${fecha}: ${times.length} apertura(s)`);

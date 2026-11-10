@@ -250,6 +250,9 @@ function mensaje(ev) {
   if (ev.tipo === 'apertura' && ev.causa === 'boton') {
     return `📱 *Apertura desde la webapp* — ${hora}` + (ev.motivo ? `\nMotivo: ${ev.motivo}` : '');
   }
+  if (ev.tipo === 'gaveta-directa' && ev.llaveAdmin) {
+    return `🔑 *Llave virtual de administrador* (${ev.llaveAdmin}) — ${hora}`;
+  }
   if (ev.tipo === 'gaveta-directa') {
     return `📱 *Apertura desde celular (RawBT)* — ${hora}\nSin comprobante · ${ev.origen || ''}`;
   }

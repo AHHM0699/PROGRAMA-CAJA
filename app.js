@@ -2640,7 +2640,8 @@ async function generarPDF(d) {
       y += 5;
       doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...DARK);
       doc.text(porHora
-        ? `Aperturas: ${bat}   Comprobantes: ${comp}   Empleado: ${emp}`
+        ? `Aperturas: ${bat}   Comprobantes: ${comp}   Empleado: ${emp}` +
+          (r.llaveAdmin ? `   Llave administrador: ${r.llaveAdmin} (${(r.llaveAdminHoras || []).join(', ')})` : '')
         : `Bat: ${bat}  =  Comprobantes: ${comp}  +  Empleado: ${emp}${diff !== 0 ? `  (suma: ${esperado})` : ''}`,
         mg+4, y);
       if (porHora && r.anomaliasHoras?.length) {
@@ -3184,6 +3185,7 @@ function tryParseJSON(str, fallback) {
 let _rcCajaTimes = [];
 let _rcCompsSAS  = [];      // comprobantes leídos del reporte del SAS (con hora de emisión)
 let _rcCuadre    = null;    // último resultado de Cuadre.cuadrar()
+let _rcLlaveAdmin = [];     // horas de aperturas con la llave virtual de administrador (SERVIDOR A37 CP)
 let _rcJustDia   = [];      // justificaciones del empleado del día consultado
 const SAS_REPORTE_URL = 'https://cheplast.organizatic.com/principal#/reportes/ventas';
 
@@ -3361,6 +3363,7 @@ function _rcJustificaciones(diaLista) {
 async function _rcMostrarDatos(data, fecha, btn) {
   const cajaTimes   = Array.isArray(data.times) ? data.times : [];
   _rcCajaTimes      = cajaTimes;
+  _rcLlaveAdmin     = Array.isArray(data.llaveAdmin) ? data.llaveAdmin : [];
   const aperturasBat = cajaTimes.length;
   // Aperturas del DÍA consultado (no solo la sesión actual), para que cuadre
   // con SERVIDOR A37 CP aunque haya habido una caja Mañana y otra Tarde ese día.
@@ -3391,7 +3394,8 @@ async function _rcMostrarDatos(data, fecha, btn) {
   if (info) {
     info.innerHTML =
       `Total aperturas (SERVIDOR A37 CP): <b>${aperturasBat}</b> &nbsp;=&nbsp; ` +
-      `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>`;
+      `Comprobantes SAS <b>(?)</b> + Aperturas empleado <b>${aperturasEmp}</b>` +
+      (_rcLlaveAdmin.length ? ` + 🔑 Llave administrador <b>${_rcLlaveAdmin.length}</b>` : '');
   }
   // Se despliega el selector DENTRO de la tarjeta y no como ventana del
   // explorador: el diálogo nativo es modal y mientras está abierto el navegador
@@ -3495,21 +3499,27 @@ function _rcProcesarTextoSAS(texto, origen) {
   }
   document.getElementById('rcZona').style.display = 'none';
 
+  // Las aperturas con la llave virtual de administrador quedan justificadas
+  const llave = _rcLlaveAdmin.map(h => ({ hora: h, motivo: '🔑 Llave virtual de administrador', tipo: 'llave-admin' }));
   const r = Cuadre.cuadrar({
     aperturas:       _rcCajaTimes.map(h => ({ hora: h })),
     comprobantes:    _rcCompsSAS,
-    justificaciones: _rcJustDia
+    justificaciones: _rcJustDia.concat(llave)
   });
   _rcCuadre = r;
+  const nLlave = r.porEmpleado.filter(p => p.evento.tipo === 'llave-admin').length;
 
   _rcSetMsg(
     `${r.totales.aperturas} aperturas de SERVIDOR A37 CP · ${r.totales.comprobantes} comprobantes · ` +
-    `${r.totales.justificaciones} justificadas por el empleado`, false);
+    `${r.totales.justificaciones - llave.length} justificadas por el empleado` +
+    (llave.length ? ` · ${nLlave} con 🔑 llave de administrador` : ''), false);
 
   state.rcRegistros = Array.isArray(state.rcRegistros) ? state.rcRegistros : [];
   state.rcRegistros.push({
     aperturasBat:  r.totales.aperturas,
-    aperturasEmp:  r.totales.justificaciones,
+    aperturasEmp:  r.totales.justificaciones - llave.length,
+    llaveAdmin:    nLlave,
+    llaveAdminHoras: llave.map(j => j.hora),
     comprobantes:  r.totales.comprobantes,
     anomalias:     r.aperturasSinJustificar.length,
     anomaliasHoras: r.aperturasSinJustificar.map(a => a.hora),
@@ -3733,7 +3743,8 @@ function _rcRenderRegistros() {
           </div>
           <div style="color:#374151;font-size:12px;margin-top:3px">
             ${porHora
-              ? `Aperturas: <b>${bat}</b> · Comprobantes: <b>${comp}</b> · Empleado: <b>${emp}</b>`
+              ? `Aperturas: <b>${bat}</b> · Comprobantes: <b>${comp}</b> · Empleado: <b>${emp}</b>` +
+                (r.llaveAdmin ? ` · 🔑 Llave administrador: <b>${r.llaveAdmin}</b>` : '')
               : `Bat: <b>${bat}</b> = Comprobantes: <b>${comp}</b> + Empleado: <b>${emp}</b>` +
                 (diff !== 0 ? `<span style="color:${color}"> (suma: ${esperado})</span>` : '')}
           </div>
