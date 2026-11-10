@@ -13,6 +13,8 @@
 //    Samsung) y escribir el código en WhatsApp → Dispositivos vinculados.
 //  - Además lee las fotos del grupo "YAPES//TRANSFERENCIAS" y agrega el
 //    monto a los Yapes de la caja abierta (ver grupo-yapes.js).
+//  - Y publica en el grupo "separaciones" los avisos de la app Separaciones
+//    (pagos por firmar, firmas y rechazos). Ver separaciones.js.
 // ════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -99,6 +101,18 @@ function iniciarYapes() {
   } catch (e) { log('Yapes automáticos desactivados:', e.message); yapes = { engancharSocket() {} }; }
 }
 
+// Avisos de la app Separaciones al grupo "separaciones" (separaciones.js).
+// Solo si config.json trae alertas.separaciones. Si falla, las alertas siguen.
+let separaciones = null;
+function iniciarSeparaciones() {
+  if (separaciones || vincular > -1 || !AL.separaciones) return;
+  try {
+    separaciones = require('./separaciones').crear({
+      config: AL.separaciones, log, getSock: () => (listo ? sock : null), guardarEnviado,
+    });
+  } catch (e) { log('Avisos de Separaciones desactivados:', e.message); separaciones = { revisar() {} }; }
+}
+
 let sock = null;
 let listo = false;
 const cola = [];      // mensajes esperando conexión
@@ -162,6 +176,7 @@ async function conectar() {
   sock.ev.on('creds.update', saveCreds);
   iniciarYapes();
   if (yapes) yapes.engancharSocket(sock);
+  iniciarSeparaciones();
 
   // Quién pide un reenvío (celular del dueño, otro dispositivo o el propio
   // Samsung): dice por qué un mensaje se queda en "Esperando mensaje"
@@ -194,6 +209,7 @@ async function conectar() {
       log('WhatsApp conectado');
       if (vincular > -1) { log('Vinculado. Ya puedes cerrar esto (Ctrl+C).'); }
       vaciarCola();
+      if (separaciones) separaciones.revisar();
     }
     if (connection === 'close') {
       listo = false;

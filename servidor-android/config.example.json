@@ -20,6 +20,7 @@
   },
   "alertas": {
     "whatsapp": "51XXXXXXXXX",
-    "grupoYapes": "YAPES//TRANSFERENCIAS"
+    "grupoYapes": "YAPES//TRANSFERENCIAS",
+    "separaciones": { "clave": "CLAVE_DE_AJUSTES_EN_SEPARACIONES" }
   }
 }

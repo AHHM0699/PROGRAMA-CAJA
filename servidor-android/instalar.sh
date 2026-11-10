@@ -20,7 +20,7 @@ npm install --omit=dev
 
 # Alertas por WhatsApp: carpeta y dependencias propias (no tocan las del servidor)
 mkdir -p "$DESTINO/alertas"
-cp "$ORIGEN/alertas/alertas.js" "$ORIGEN/alertas/grupo-yapes.js" "$ORIGEN/alertas/package.json" "$DESTINO/alertas/"
+cp "$ORIGEN/alertas/alertas.js" "$ORIGEN/alertas/grupo-yapes.js" "$ORIGEN/alertas/separaciones.js" "$ORIGEN/alertas/package.json" "$DESTINO/alertas/"
 # --legacy-peer-deps: sin sharp ni jimp (las fotos de Yapes se leen con claude -p)
 # firebase-admin no se instala aquí: lo toma de ../node_modules (el servidor)
 (cd "$DESTINO/alertas" && npm install --omit=dev --legacy-peer-deps)
