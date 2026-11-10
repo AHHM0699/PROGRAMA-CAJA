@@ -18,7 +18,7 @@
     "clientId": "PEGAR_CLIENT_ID.apps.googleusercontent.com",
     "clientSecret": "PEGAR_CLIENT_SECRET"
   },
-  "llaveAdmin": { "nombre": "Abdon", "ips": ["192.168.1.3"] },
+  "llaveAdmin": { "nombre": "Abdon", "firmas": ["1b401b321b70000a0a0a0a0a"] },
   "alertas": {
     "whatsapp": "51XXXXXXXXX",
     "grupoYapes": "YAPES//TRANSFERENCIAS"

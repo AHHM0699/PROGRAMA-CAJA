@@ -60,11 +60,17 @@ const CMD_ASB_ON   = Buffer.from([0x1d, 0x61, 0x0f]);              // GS a 15
 const CMD_ESTADO   = Buffer.from([0x10, 0x04, 0x01]);              // DLE EOT 1
 
 // Llave virtual de administrador: la orden directa de gaveta (sin imprimir)
-// que llega desde estos dispositivos es del dueño y queda justificada.
-// config.json → "llaveAdmin": { "nombre": "Abdon", "ips": ["192.168.1.3"] }
-// (Android no deja ver la MAC: conviene reservar esa IP en el router.)
-const LLAVE_ADMIN = CONFIG.llaveAdmin && Array.isArray(CONFIG.llaveAdmin.ips) ? CONFIG.llaveAdmin : null;
-function esLlaveAdmin(origen) { return !!(LLAVE_ADMIN && LLAVE_ADMIN.ips.includes(origen)); }
+// del atajo del dueño queda justificada. Se reconoce por los bytes exactos
+// que manda el atajo ("firma", en hex), no por la IP: el celular cambia de
+// IP seguido y Android no deja ver la MAC. "ips" es opcional.
+// config.json → "llaveAdmin": { "nombre": "Abdon", "firmas": ["1b401b321b70000a0a0a0a0a"] }
+const LLAVE_ADMIN = CONFIG.llaveAdmin &&
+  (Array.isArray(CONFIG.llaveAdmin.firmas) || Array.isArray(CONFIG.llaveAdmin.ips)) ? CONFIG.llaveAdmin : null;
+function esLlaveAdmin(origen, hex) {
+  if (!LLAVE_ADMIN) return false;
+  if ((LLAVE_ADMIN.firmas || []).some(f => String(f).toLowerCase() === hex)) return true;
+  return (LLAVE_ADMIN.ips || []).includes(origen);
+}
 const MOTIVO_LLAVE = `Llave virtual de administrador${LLAVE_ADMIN && LLAVE_ADMIN.nombre ? ' (' + LLAVE_ADMIN.nombre + ')' : ''}`;
 
 // Ventana para atribuir una apertura a su causa
@@ -346,7 +352,7 @@ function procesarCola() {
     // Solo la orden de gaveta, sin nada impreso (p. ej. el botón "abrir
     // cajón" de RawBT): se abrió la caja sin comprobante.
     if (bytes < (CONFIG.minBytesImpresion || 32) && traeGaveta) {
-      const admin = esLlaveAdmin(origen);
+      const admin = esLlaveAdmin(origen, muestra.toString('hex'));
       trabajo.tipo = admin ? 'llave-admin' : 'gaveta-directa';
       if (admin) trabajo.motivo = MOTIVO_LLAVE;
       anotar('impresiones', { hora: horaPE(inicio), iso: inicio.toISOString(), origen, bytes,
