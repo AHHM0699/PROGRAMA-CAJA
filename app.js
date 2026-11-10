@@ -1694,12 +1694,14 @@ async function guardarApertura() {
 }
 
 // ── Apertura por el EMPLEADO: solo con el cierre anterior ───────────────
-//  Usa el conteo por billetes del último cierre, sin los billetes de
-//  S/ 200, 100 y 50 (los retira el administrador). Si el último cierre fue
-//  el mismo día, "Ventas hasta ahora" = sus ventas finales (el SAS acumula
-//  el día); si fue otro día, 0. "Último Yape" = el último yape de ese cierre.
-const DENOMS_RETIRADOS = [50, 100, 200];
-let _aperturaEmp = null;   // datos calculados que se muestran antes de confirmar
+//  Usa el conteo por billetes del último cierre. Los billetes de S/ 50,
+//  100 y 200 se mantienen, salvo que se marque quitarlos (todos o ninguno:
+//  los retira el administrador). Hoy se abre una sola caja por día (turno
+//  mañana), así que "Ventas hasta ahora" y "Último Yape" empiezan en 0.
+const DENOMS_GRANDES = [50, 100, 200];
+let _aperturaEmp = null;          // datos calculados que se muestran antes de confirmar
+let _aperturaEmpCierre = null;    // último cierre leído
+let _aperturaEmpQuitar = false;   // ¿quitar los billetes de 50, 100 y 200?
 
 async function _ultimoCierre() {
   const snap = await historialCol.orderBy('fecha', 'desc').limit(25).get();
@@ -1707,33 +1709,67 @@ async function _ultimoCierre() {
   return doc ? { id: doc.id, ...doc.data() } : null;
 }
 
-function _aperturaDesdeCierre(c) {
+function _aperturaDesdeCierre(c, quitarGrandes) {
   if (!c) return { error: 'No encontré un cierre anterior.' };
   const bd = Array.isArray(c.cierreBreakdown) ? c.cierreBreakdown : [];
   if (!bd.length) return { error: `El último cierre (${c.cajaNombre || 'sin nombre'}) se hizo sin conteo por billetes.` };
-  const qtys = DENOMS.map(d => {
-    if (DENOMS_RETIRADOS.includes(d.val)) return 0;
-    const it = bd.find(x => x.label === d.label);
-    return it ? (parseFloat(it.qty) || 0) : 0;
-  });
-  const breakdown = DENOMS.reduce((arr, d, i) => {
-    if (qtys[i] > 0) arr.push({ label: d.label, qty: qtys[i], subtotal: round2(qtys[i] * d.val), tipo: d.tipo });
+  const qtyDe = d => { const it = bd.find(x => x.label === d.label); return it ? (parseFloat(it.qty) || 0) : 0; };
+  const grandes = round2(DENOMS.filter(d => DENOMS_GRANDES.includes(d.val)).reduce((t, d) => t + qtyDe(d) * d.val, 0));
+  const breakdown = DENOMS.reduce((arr, d) => {
+    const q = (quitarGrandes && DENOMS_GRANDES.includes(d.val)) ? 0 : qtyDe(d);
+    if (q > 0) arr.push({ label: d.label, qty: q, subtotal: round2(q * d.val), tipo: d.tipo });
     return arr;
   }, []);
   const total = round2(breakdown.reduce((t, x) => t + x.subtotal, 0));
-  const retirado = round2(bd.filter(x => DENOMS.some(d => d.label === x.label && DENOMS_RETIRADOS.includes(d.val)))
-    .reduce((t, x) => t + (parseFloat(x.subtotal) || 0), 0));
-  const fechaCierre = c.fecha ? new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(c.fecha)) : '';
-  const mismoDia = fechaCierre === _todayPE();
-  const yl = Array.isArray(c.yapesList) ? c.yapesList : [];
   const turno = _turnoDe(new Date().toISOString()) === 'AM' ? 'MAÑANA' : 'TARDE';
   const ddmm = new Date().toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit' });
   return {
-    cierre: c, breakdown, total, retirado, mismoDia,
+    cierre: c, breakdown, total, grandes, quitarGrandes: !!quitarGrandes,
     nombre: `${turno} ${ddmm}`,
-    ventasHastaAhora: mismoDia ? (parseFloat(c.ventasFinal) || 0) : 0,
-    ultimoYape: yl.length ? (parseFloat(yl[yl.length - 1]) || 0) : 0,
+    ventasHastaAhora: 0,
+    ultimoYape: 0,
   };
+}
+
+function _pintarAperturaEmpleado() {
+  const res = document.getElementById('empAperturaResumen');
+  const btn = document.getElementById('btnEmpAbrirCaja');
+  if (!res || !btn) return;
+  const a = _aperturaEmp;
+  if (!a) return;
+  if (a.error) {
+    res.innerHTML = `<p style="color:#b91c1c;font-size:13px">${escHtml(a.error)}<br>Pide al administrador que abra la caja.</p>`;
+    btn.disabled = true;
+    return;
+  }
+  const c = a.cierre;
+  const hora = c.fecha ? new Date(c.fecha).toLocaleString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  res.innerHTML = `
+    <p style="font-size:13px;color:#6b7280;margin-bottom:8px">
+      Conteo del cierre anterior: <b>${escHtml(c.cajaNombre || '')}</b> (${escHtml(hora)}).
+    </p>
+    ${a.grandes > 0 ? `
+    <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-bottom:8px;cursor:pointer">
+      <input type="checkbox" ${a.quitarGrandes ? 'checked' : ''} onchange="_toggleQuitarGrandes(this.checked)">
+      Quitar los billetes de S/ 200, 100 y 50 (${fmt(a.grandes)})
+    </label>` : ''}
+    ${a.breakdown.map(x => `
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6;font-size:14px">
+        <span>${escHtml(x.label)} × ${x.qty}</span><span>${fmt(x.subtotal)}</span>
+      </div>`).join('')}
+    <div style="display:flex;justify-content:space-between;padding:8px 0 2px;font-weight:700;font-size:15px">
+      <span>Caja inicial</span><span>${fmt(a.total)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:10px">
+      <span>Nombre</span><span>${escHtml(a.nombre)}</span>
+    </div>`;
+  btn.disabled = false;
+}
+
+function _toggleQuitarGrandes(quitar) {
+  _aperturaEmpQuitar = !!quitar;
+  _aperturaEmp = _aperturaDesdeCierre(_aperturaEmpCierre, _aperturaEmpQuitar);
+  _pintarAperturaEmpleado();
 }
 
 async function _prepararAperturaEmpleado() {
@@ -1745,38 +1781,15 @@ async function _prepararAperturaEmpleado() {
   card.classList.remove('hidden');
   fb.textContent = '';
   btn.disabled = true;
+  _aperturaEmpQuitar = false;
   res.innerHTML = '<p style="color:#9ca3af;font-size:13px">Leyendo el último cierre…</p>';
   try {
-    _aperturaEmp = _aperturaDesdeCierre(await _ultimoCierre());
+    _aperturaEmpCierre = await _ultimoCierre();
+    _aperturaEmp = _aperturaDesdeCierre(_aperturaEmpCierre, _aperturaEmpQuitar);
   } catch (e) {
     _aperturaEmp = { error: 'No se pudo leer el último cierre (' + (e.code || e.message) + ').' };
   }
-  const a = _aperturaEmp;
-  if (a.error) {
-    res.innerHTML = `<p style="color:#b91c1c;font-size:13px">${escHtml(a.error)}<br>Pide al administrador que abra la caja.</p>`;
-    return;
-  }
-  const c = a.cierre;
-  const hora = c.fecha ? new Date(c.fecha).toLocaleString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-  res.innerHTML = `
-    <p style="font-size:13px;color:#6b7280;margin-bottom:8px">
-      Cierre anterior: <b>${escHtml(c.cajaNombre || '')}</b> (${escHtml(hora)}).
-      Se descuentan los billetes de S/ 200, 100 y 50${a.retirado ? ` (${fmt(a.retirado)})` : ''}.
-    </p>
-    ${a.breakdown.map(x => `
-      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6;font-size:14px">
-        <span>${escHtml(x.label)} × ${x.qty}</span><span>${fmt(x.subtotal)}</span>
-      </div>`).join('')}
-    <div style="display:flex;justify-content:space-between;padding:8px 0 2px;font-weight:700;font-size:15px">
-      <span>Caja inicial</span><span>${fmt(a.total)}</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280">
-      <span>Ventas hasta ahora ${a.mismoDia ? '(del cierre anterior)' : '(día nuevo)'}</span><span>${fmt(a.ventasHastaAhora)}</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:10px">
-      <span>Nombre</span><span>${escHtml(a.nombre)}</span>
-    </div>`;
-  btn.disabled = false;
+  _pintarAperturaEmpleado();
 }
 
 async function abrirCajaEmpleado() {
@@ -1795,7 +1808,7 @@ async function abrirCajaEmpleado() {
       return;
     }
     // Volver a leer el cierre por si hubo uno nuevo desde que se mostró
-    const a = _aperturaDesdeCierre(await _ultimoCierre());
+    const a = _aperturaDesdeCierre(await _ultimoCierre(), _aperturaEmpQuitar);
     if (a.error || a.cierre.id !== _aperturaEmp.cierre.id || a.total !== _aperturaEmp.total) {
       fb.textContent = 'El último cierre cambió: revisa los valores y vuelve a confirmar.';
       await _prepararAperturaEmpleado();
