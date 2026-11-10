@@ -1694,14 +1694,14 @@ async function guardarApertura() {
 }
 
 // ── Apertura por el EMPLEADO: solo con el cierre anterior ───────────────
-//  Usa el conteo por billetes del último cierre. Los billetes de S/ 50,
-//  100 y 200 se mantienen, salvo que se marque quitarlos (todos o ninguno:
-//  los retira el administrador). Hoy se abre una sola caja por día (turno
+//  Usa el conteo por billetes del último cierre. Por defecto se quitan los
+//  billetes de S/ 50, 100 y 200 (los retira el administrador); si se dejó
+//  alguno, se pueden agregar marcando la casilla (todos o ninguno). Hoy se abre una sola caja por día (turno
 //  mañana), así que "Ventas hasta ahora" y "Último Yape" empiezan en 0.
 const DENOMS_GRANDES = [50, 100, 200];
 let _aperturaEmp = null;          // datos calculados que se muestran antes de confirmar
 let _aperturaEmpCierre = null;    // último cierre leído
-let _aperturaEmpQuitar = false;   // ¿quitar los billetes de 50, 100 y 200?
+let _aperturaEmpQuitar = true;    // ¿quitar los billetes de 50, 100 y 200? (por defecto sí)
 
 async function _ultimoCierre() {
   const snap = await historialCol.orderBy('fecha', 'desc').limit(25).get();
@@ -1750,8 +1750,8 @@ function _pintarAperturaEmpleado() {
     </p>
     ${a.grandes > 0 ? `
     <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-bottom:8px;cursor:pointer">
-      <input type="checkbox" ${a.quitarGrandes ? 'checked' : ''} onchange="_toggleQuitarGrandes(this.checked)">
-      Quitar los billetes de S/ 200, 100 y 50 (${fmt(a.grandes)})
+      <input type="checkbox" ${a.quitarGrandes ? '' : 'checked'} onchange="_toggleQuitarGrandes(!this.checked)">
+      Agregar los billetes de S/ 200, 100 y 50 que se dejaron (${fmt(a.grandes)})
     </label>` : ''}
     ${a.breakdown.map(x => `
       <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6;font-size:14px">
@@ -1781,7 +1781,7 @@ async function _prepararAperturaEmpleado() {
   card.classList.remove('hidden');
   fb.textContent = '';
   btn.disabled = true;
-  _aperturaEmpQuitar = false;
+  _aperturaEmpQuitar = true;
   res.innerHTML = '<p style="color:#9ca3af;font-size:13px">Leyendo el último cierre…</p>';
   try {
     _aperturaEmpCierre = await _ultimoCierre();
