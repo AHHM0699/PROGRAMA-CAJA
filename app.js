@@ -414,36 +414,109 @@ function _textoYapes({ nuevos, yaEstaban }) {
     (yaEstaban ? ` · ${yaEstaban} ya estaban` : '');
 }
 
-// Automático: escucha la lista de hoy mientras la caja de hoy está abierta
-let _yapesGrupoUnsub = null, _yapesGrupoLista = null, _yapesGrupoOcupado = false;
-async function _yapesGrupoAplicar() {
-  if (!_yapesGrupoLista || !state.cajaAbierta || !currentCajaId || !_cajaCargada) return;
-  // Solo la caja abierta hoy (si hubiera dos, la del día)
+// ── A qué caja va cada yape del grupo ────────────────────────────────
+//  Cada yape se asigna a UNA sola caja y queda anotado en
+//  yapesGrupo/{fecha}.asignados = { idMensaje: cajaId } (en la misma
+//  transacción que lo suma), así ninguna otra caja lo vuelve a tomar
+//  (p. ej. la de la tarde no repite los yapes de la mañana).
+//  Caja dueña de un yape sin asignar, entre las cajas abiertas HOY:
+//   - la abierta más recientemente ANTES de la hora del yape (si por error
+//     hay dos abiertas, la más nueva);
+//   - si a esa hora no había ninguna, la primera que se abrió después
+//     (los yapes que llegan sin caja abierta pasan a la próxima caja del día).
+function _horaYapeMs(fecha, y) {
+  const t = Date.parse(`${fecha}T${String(y.hora || '00:00').slice(0, 5)}:00-05:00`);
+  return isNaN(t) ? 0 : t;
+}
+function _cajaDuenaDe(fecha, y, abiertas) {
+  if (!abiertas.length) return null;
+  const t = _horaYapeMs(fecha, y);
+  const antes = abiertas.filter(c => c.ap <= t + 60e3).sort((a, b) => b.ap - a.ap);
+  if (antes.length) return antes[0].id;
+  return abiertas.slice().sort((a, b) => a.ap - b.ap)[0].id;
+}
+async function _cajasAbiertasHoy() {
   const fecha = _todayPE();
-  const ap = state.aperturaFecha ? new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(state.aperturaFecha)) : '';
-  if (ap !== fecha) return;
-  // Sin trabajo pendiente según la copia local: no tocar el servidor
-  if (!_calcMergeYapes(state.yapesRaw, state.yapesGrupoIds, _yapesGrupoLista, false).cambio) return;
-  if (_yapesGrupoOcupado) return;
+  const snap = await db.collection('cajas').where('cajaAbierta', '==', true).get();
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .filter(c => !c.eliminada && c.aperturaFecha &&
+      new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(c.aperturaFecha)) === fecha)
+    .map(c => ({ id: c.id, nombre: c.nombre || '', ap: new Date(c.aperturaFecha).getTime() }));
+}
+function _esCajaDeHoy() {
+  if (!state.aperturaFecha) return false;
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(state.aperturaFecha)) === _todayPE();
+}
+
+// Suma a la caja actual los yapes del grupo que le tocan (porMonto: modo botón).
+async function _mergeGrupoEnCaja(porMonto) {
+  const cajaId = currentCajaId;
+  if (!cajaId) throw new Error('no hay caja');
+  const fecha  = _todayPE();
+  const abiertas = await _cajasAbiertasHoy();
+  if (!abiertas.some(c => c.id === cajaId)) {
+    return { nuevos: [], yaEstaban: 0, cambio: false, fueraDeHoy: true };
+  }
+  const ref  = db.doc(`cajas/${cajaId}`);
+  const gref = db.doc(`yapesGrupo/${fecha}`);
+  const r = await db.runTransaction(async tx => {
+    const s = await tx.get(ref);
+    const g = await tx.get(gref);
+    if (!s.exists) throw new Error('la caja ya no existe');
+    const lista = g.exists ? (g.data().lista || []) : [];
+    const asig  = g.exists ? { ...(g.data().asignados || {}) } : {};
+    const mias  = lista.filter(y => y && y.id &&
+      (asig[y.id] === cajaId || (!asig[y.id] && _cajaDuenaDe(fecha, y, abiertas) === cajaId)));
+    const d = s.data();
+    const res = _calcMergeYapes(typeof d.yapesRaw === 'string' ? d.yapesRaw : '', d.yapesGrupoIds || [], mias, porMonto);
+    let asigCambio = false;
+    mias.forEach(y => { if (!asig[y.id]) { asig[y.id] = cajaId; asigCambio = true; } });
+    if (res.cambio) tx.update(ref, { yapesRaw: res.raw, yapesGrupoIds: res.ids, _ts: Date.now() });
+    if (asigCambio) tx.update(gref, { asignados: asig });
+    res.hayGrupo = lista.length > 0;
+    return res;
+  });
+  if (cajaId !== currentCajaId) return r;
+  state.yapesRaw = r.raw; state.yapesGrupoIds = r.ids;
+  _synced.yapesRaw = _json(r.raw); _synced.yapesGrupoIds = _json(r.ids);
+  _refrescarYapesDom();
+  if (r.cambio) _syncBorrador();
+  return r;
+}
+
+// Automático: escucha la lista de hoy mientras la caja de hoy está abierta
+let _yapesGrupoUnsub = null, _yapesGrupoLista = null, _yapesGrupoAsig = {}, _yapesGrupoOcupado = false, _yapesGrupoOtraVez = false;
+async function _yapesGrupoAplicar() {
+  if (!_yapesGrupoLista || !state.cajaAbierta || !currentCajaId || !_cajaCargada || !_esCajaDeHoy()) return;
+  // ¿Hay algo para esta caja? (sin asignar, o asignado a ella y aún no cargado)
+  const cajaId = currentCajaId;
+  const candidatos = _yapesGrupoLista.filter(y => y && y.id &&
+    (!_yapesGrupoAsig[y.id] || _yapesGrupoAsig[y.id] === cajaId));
+  if (!_calcMergeYapes(state.yapesRaw, state.yapesGrupoIds, candidatos, false).cambio &&
+      !candidatos.some(y => !_yapesGrupoAsig[y.id])) return;
+  if (_yapesGrupoOcupado) { _yapesGrupoOtraVez = true; return; }
   _yapesGrupoOcupado = true;
   try {
-    const lista = _yapesGrupoLista;
-    const r = await _cambiarYapesCaja((raw, ids) => _calcMergeYapes(raw, ids, lista, false));
+    const r = await _mergeGrupoEnCaja(false);
     if (r.nuevos.length) showSyncToast(_textoYapes(r));
   } catch (e) { console.warn('Yapes del grupo:', e); }
-  finally { _yapesGrupoOcupado = false; }
+  finally {
+    _yapesGrupoOcupado = false;
+    if (_yapesGrupoOtraVez) { _yapesGrupoOtraVez = false; setTimeout(_yapesGrupoAplicar, 500); }
+  }
 }
 function _yapesGrupoListen() {
   _yapesGrupoStop();
   if (!currentCajaId) return;
   _yapesGrupoUnsub = db.doc(`yapesGrupo/${_todayPE()}`).onSnapshot(snap => {
     _yapesGrupoLista = snap.exists ? (snap.data().lista || []) : null;
+    _yapesGrupoAsig  = snap.exists ? (snap.data().asignados || {}) : {};
     _yapesGrupoAplicar();
   }, err => console.warn('yapesGrupo:', err));
 }
 function _yapesGrupoStop() {
   if (_yapesGrupoUnsub) { _yapesGrupoUnsub(); _yapesGrupoUnsub = null; }
-  _yapesGrupoLista = null;
+  _yapesGrupoLista = null; _yapesGrupoAsig = {};
 }
 // Cambio de día con la página abierta
 setInterval(() => { if (_yapesGrupoUnsub && currentCajaId) _yapesGrupoListen(); }, 30 * 60 * 1000);
@@ -453,11 +526,10 @@ async function completarYapesDelDia(btn) {
   if (!currentCajaId) { showSyncToast('Abre una caja primero'); return; }
   if (btn) btn.disabled = true;
   try {
-    const snap  = await db.doc(`yapesGrupo/${_todayPE()}`).get();
-    const lista = snap.exists ? (snap.data().lista || []) : [];
-    if (!lista.length) { showSyncToast('💚 Todavía no hay yapes del grupo hoy'); return; }
-    const r = await _cambiarYapesCaja((raw, ids) => _calcMergeYapes(raw, ids, lista, true));
-    showSyncToast(r.nuevos.length ? _textoYapes(r) : '💚 Los yapes del grupo ya estaban todos');
+    const r = await _mergeGrupoEnCaja(true);
+    if (r.fueraDeHoy)    showSyncToast('💚 Esta caja no es de hoy: los yapes del grupo van a la caja abierta hoy');
+    else if (!r.hayGrupo) showSyncToast('💚 Todavía no hay yapes del grupo hoy');
+    else showSyncToast(r.nuevos.length ? _textoYapes(r) : '💚 Los yapes del grupo ya estaban todos');
   } catch (e) {
     console.warn('completarYapesDelDia:', e);
     showSyncToast('⚠ No se pudieron leer los yapes del grupo (' + (e.code || e.message) + ')');
@@ -549,6 +621,9 @@ async function _renderCajasLista() {
     if (visible) _actualizarContadorSelectorCC();
   };
 
+  const cardEmp = document.getElementById('selectorAbrirCajaEmp');
+  if (cardEmp) cardEmp.classList.add('hidden');
+
   try {
     const snap  = await db.collection('cajas').get();
     const cajas = snap.docs
@@ -560,9 +635,10 @@ async function _renderCajasLista() {
     if (cajas.length === 0) {
       lista.innerHTML = '<p class="no-cajas-msg">No hay cajas abiertas</p>';
 
-      // Empleado sin cajas → mensaje de espera
+      // Empleado sin cajas → puede abrir con el cierre anterior
       if (userRole === 'employee') {
-        lista.innerHTML = '<p class="no-cajas-msg">⏳ Esperando apertura de caja…</p>';
+        lista.innerHTML = '<p class="no-cajas-msg">No hay caja abierta</p>';
+        _prepararAperturaEmpleado();
       }
       showCcCard(false);
       return;
@@ -1559,22 +1635,19 @@ function getEsperado() {
 // ============================================================
 //  APERTURA
 // ============================================================
-function guardarApertura() {
-  const nombreInput = document.getElementById('cajaNombreInput')?.value.trim();
-  const nombre = nombreInput ||
-    `Caja ${new Date().toLocaleString('es-PE', { timeZone: TZ, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}`;
-
-  currentCajaNombre = nombre;
+// Crea la caja (y su borrador en el historial) con los datos dados y la deja
+// activa en este dispositivo. La usan el administrador y el empleado.
+function _crearCaja(d) {
+  state = _defaultState();
+  currentCajaNombre = d.nombre;
   state.cajaAbierta      = true;
-  state.nombre           = nombre;
-  state.cajaInicial      = getCajaInicial();
-  state.ventasHastaAhora = parseFloat(document.getElementById('ventasHastaAhora').value) || 0;
-  state.ultimoYape       = parseFloat(document.getElementById('ultimoYape').value) || 0;
+  state.nombre           = d.nombre;
+  state.cajaInicial      = round2(d.cajaInicial || 0);
+  state.inicialMode      = d.inicialMode || 'monto';
+  state.inicialBreakdown = d.inicialBreakdown || null;
+  state.ventasHastaAhora = d.ventasHastaAhora || 0;
+  state.ultimoYape       = d.ultimoYape || 0;
   state.aperturaFecha    = new Date().toISOString();
-  state.inicialBreakdown = state.inicialMode === 'denom' ? getDenomBreakdown('inicial') : null;
-  state.yapesRaw         = '';
-  state.yapesGrupoIds    = [];
-  state.eventos          = [];
   state._ts              = Date.now();
 
   // Crear nuevo documento en la colección cajas
@@ -1589,12 +1662,159 @@ function guardarApertura() {
   _synced = {};
   _marcarSincronizado(docNuevo);
   _cajaCargada = true;
-  newRef.set(docNuevo).catch(e => console.error('Error creando caja:', e));
+  const extra = { aperturaPor: auth.currentUser ? auth.currentUser.email : null, aperturaRol: userRole };
+  newRef.set({ ...docNuevo, ...extra }).catch(e => console.error('Error creando caja:', e));
   borradorRef.set(_buildBorradorDoc()).catch(e => console.warn('Error creando borrador:', e));
 
   startRealtimeSync();
   _updateCajaHeader();
+}
+
+async function guardarApertura() {
+  // Evitar dos cajas abiertas por error
+  try {
+    const abiertas = await _cajasAbiertasHoy();
+    if (abiertas.length &&
+        !confirm(`Ya hay una caja abierta hoy (${abiertas.map(c => c.nombre).join(', ')}).\n¿Abrir otra de todos modos?`)) return;
+  } catch (e) { /* sin conexión: se deja abrir */ }
+
+  const nombreInput = document.getElementById('cajaNombreInput')?.value.trim();
+  const nombre = nombreInput ||
+    `Caja ${new Date().toLocaleString('es-PE', { timeZone: TZ, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}`;
+  const modo = state.inicialMode;
+  _crearCaja({
+    nombre,
+    cajaInicial:      getCajaInicial(),
+    inicialMode:      modo,
+    inicialBreakdown: modo === 'denom' ? getDenomBreakdown('inicial') : null,
+    ventasHastaAhora: parseFloat(document.getElementById('ventasHastaAhora').value) || 0,
+    ultimoYape:       parseFloat(document.getElementById('ultimoYape').value) || 0,
+  });
   showView('cierre');
+}
+
+// ── Apertura por el EMPLEADO: solo con el cierre anterior ───────────────
+//  Usa el conteo por billetes del último cierre, sin los billetes de
+//  S/ 200, 100 y 50 (los retira el administrador). Si el último cierre fue
+//  el mismo día, "Ventas hasta ahora" = sus ventas finales (el SAS acumula
+//  el día); si fue otro día, 0. "Último Yape" = el último yape de ese cierre.
+const DENOMS_RETIRADOS = [50, 100, 200];
+let _aperturaEmp = null;   // datos calculados que se muestran antes de confirmar
+
+async function _ultimoCierre() {
+  const snap = await historialCol.orderBy('fecha', 'desc').limit(25).get();
+  const doc = snap.docs.find(d => d.data().estado === 'cerrado');
+  return doc ? { id: doc.id, ...doc.data() } : null;
+}
+
+function _aperturaDesdeCierre(c) {
+  if (!c) return { error: 'No encontré un cierre anterior.' };
+  const bd = Array.isArray(c.cierreBreakdown) ? c.cierreBreakdown : [];
+  if (!bd.length) return { error: `El último cierre (${c.cajaNombre || 'sin nombre'}) se hizo sin conteo por billetes.` };
+  const qtys = DENOMS.map(d => {
+    if (DENOMS_RETIRADOS.includes(d.val)) return 0;
+    const it = bd.find(x => x.label === d.label);
+    return it ? (parseFloat(it.qty) || 0) : 0;
+  });
+  const breakdown = DENOMS.reduce((arr, d, i) => {
+    if (qtys[i] > 0) arr.push({ label: d.label, qty: qtys[i], subtotal: round2(qtys[i] * d.val), tipo: d.tipo });
+    return arr;
+  }, []);
+  const total = round2(breakdown.reduce((t, x) => t + x.subtotal, 0));
+  const retirado = round2(bd.filter(x => DENOMS.some(d => d.label === x.label && DENOMS_RETIRADOS.includes(d.val)))
+    .reduce((t, x) => t + (parseFloat(x.subtotal) || 0), 0));
+  const fechaCierre = c.fecha ? new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(c.fecha)) : '';
+  const mismoDia = fechaCierre === _todayPE();
+  const yl = Array.isArray(c.yapesList) ? c.yapesList : [];
+  const turno = _turnoDe(new Date().toISOString()) === 'AM' ? 'MAÑANA' : 'TARDE';
+  const ddmm = new Date().toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit' });
+  return {
+    cierre: c, breakdown, total, retirado, mismoDia,
+    nombre: `${turno} ${ddmm}`,
+    ventasHastaAhora: mismoDia ? (parseFloat(c.ventasFinal) || 0) : 0,
+    ultimoYape: yl.length ? (parseFloat(yl[yl.length - 1]) || 0) : 0,
+  };
+}
+
+async function _prepararAperturaEmpleado() {
+  const card = document.getElementById('selectorAbrirCajaEmp');
+  const res  = document.getElementById('empAperturaResumen');
+  const btn  = document.getElementById('btnEmpAbrirCaja');
+  const fb   = document.getElementById('empAperturaFeedback');
+  if (!card || !res) return;
+  card.classList.remove('hidden');
+  fb.textContent = '';
+  btn.disabled = true;
+  res.innerHTML = '<p style="color:#9ca3af;font-size:13px">Leyendo el último cierre…</p>';
+  try {
+    _aperturaEmp = _aperturaDesdeCierre(await _ultimoCierre());
+  } catch (e) {
+    _aperturaEmp = { error: 'No se pudo leer el último cierre (' + (e.code || e.message) + ').' };
+  }
+  const a = _aperturaEmp;
+  if (a.error) {
+    res.innerHTML = `<p style="color:#b91c1c;font-size:13px">${escHtml(a.error)}<br>Pide al administrador que abra la caja.</p>`;
+    return;
+  }
+  const c = a.cierre;
+  const hora = c.fecha ? new Date(c.fecha).toLocaleString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  res.innerHTML = `
+    <p style="font-size:13px;color:#6b7280;margin-bottom:8px">
+      Cierre anterior: <b>${escHtml(c.cajaNombre || '')}</b> (${escHtml(hora)}).
+      Se descuentan los billetes de S/ 200, 100 y 50${a.retirado ? ` (${fmt(a.retirado)})` : ''}.
+    </p>
+    ${a.breakdown.map(x => `
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6;font-size:14px">
+        <span>${escHtml(x.label)} × ${x.qty}</span><span>${fmt(x.subtotal)}</span>
+      </div>`).join('')}
+    <div style="display:flex;justify-content:space-between;padding:8px 0 2px;font-weight:700;font-size:15px">
+      <span>Caja inicial</span><span>${fmt(a.total)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280">
+      <span>Ventas hasta ahora ${a.mismoDia ? '(del cierre anterior)' : '(día nuevo)'}</span><span>${fmt(a.ventasHastaAhora)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;margin-bottom:10px">
+      <span>Nombre</span><span>${escHtml(a.nombre)}</span>
+    </div>`;
+  btn.disabled = false;
+}
+
+async function abrirCajaEmpleado() {
+  const btn = document.getElementById('btnEmpAbrirCaja');
+  const fb  = document.getElementById('empAperturaFeedback');
+  if (!_aperturaEmp || _aperturaEmp.error) return;
+  btn.disabled = true;
+  fb.className = 'feedback-text';
+  fb.textContent = 'Abriendo…';
+  try {
+    // Nunca dos cajas: si alguien abrió una mientras tanto, se usa esa
+    const abiertas = await _cajasAbiertasHoy();
+    if (abiertas.length) {
+      fb.textContent = `Ya hay una caja abierta (${abiertas.map(c => c.nombre).join(', ')}).`;
+      await _renderCajasLista();
+      return;
+    }
+    // Volver a leer el cierre por si hubo uno nuevo desde que se mostró
+    const a = _aperturaDesdeCierre(await _ultimoCierre());
+    if (a.error || a.cierre.id !== _aperturaEmp.cierre.id || a.total !== _aperturaEmp.total) {
+      fb.textContent = 'El último cierre cambió: revisa los valores y vuelve a confirmar.';
+      await _prepararAperturaEmpleado();
+      return;
+    }
+    _crearCaja({
+      nombre: a.nombre, cajaInicial: a.total, inicialMode: 'denom', inicialBreakdown: a.breakdown,
+      ventasHastaAhora: a.ventasHastaAhora, ultimoYape: a.ultimoYape,
+    });
+    document.getElementById('viewCajaSelector').classList.add('hidden');
+    _applyRoleUI();
+    showView('auto');
+    showSyncToast(`📂 Caja ${a.nombre} abierta con ${fmt(a.total)}`);
+  } catch (e) {
+    fb.className = 'feedback-text err';
+    fb.textContent = 'No se pudo abrir la caja (' + (e.code || e.message) + ').';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function renderResumen() {
@@ -1832,7 +2052,16 @@ function calcularDiferencia() {
 // ============================================================
 //  CLOSE CASH & GENERATE PDF
 // ============================================================
-function confirmarCierre() {
+async function confirmarCierre() {
+  // Los yapes del grupo que le tocan a esta caja deben estar antes de cerrar
+  try {
+    const r = await _mergeGrupoEnCaja(false);
+    if (r.nuevos.length) {
+      showSyncToast(_textoYapes(r) + ' · revisa antes de cerrar');
+      calcularEsperado();
+      return;
+    }
+  } catch (e) { console.warn('Yapes antes del cierre:', e); }
   if (!_rcReporteHecho()) {
     _rcSetMsg('⚠ Debes completar el Reporte de Caja antes de cerrar.', false);
     document.getElementById('rcCard').scrollIntoView({ behavior: 'smooth', block: 'center' });

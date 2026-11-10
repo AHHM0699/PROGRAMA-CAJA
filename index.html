@@ -80,6 +80,20 @@
           + Abrir nueva caja
         </button>
 
+        <!-- Empleado: abrir la caja con el cierre anterior (sin billetes de 200, 100 y 50) -->
+        <div id="selectorAbrirCajaEmp" class="hidden" style="margin-top:18px;text-align:left">
+          <div class="card">
+            <div class="card-head"><h3>📂 Abrir caja</h3></div>
+            <div class="card-body">
+              <div id="empAperturaResumen"></div>
+              <button class="btn btn-primary btn-block" id="btnEmpAbrirCaja" onclick="abrirCajaEmpleado()" disabled>
+                📂 Abrir caja con estos valores
+              </button>
+              <span id="empAperturaFeedback" class="feedback-text"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- Apertura física para empleado cuando no hay cajas abiertas -->
         <div id="selectorAperturaCC" class="hidden" style="margin-top:18px;text-align:left">
           <div class="card">

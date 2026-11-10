@@ -7,7 +7,8 @@
 //  2. El Claude Code del celular (`claude -p` en Debian, usa el plan del
 //     dueño, sin API) lee el monto del comprobante.
 //  3. El monto queda en la lista del día yapesGrupo/{fecha} y a la foto se
-//     le pone ✅. La webapp (única que escribe la caja) lo agrega solo a
+//     le pone ✅ (🕓 y un aviso si no hay caja abierta: se suma a la
+//     próxima caja que se abra ese día; aviso si hay dos cajas abiertas). La webapp (única que escribe la caja) lo agrega solo a
 //     los Yapes de la caja abierta de hoy, sin duplicar; el botón
 //     "💚 Yapes" hace lo mismo a pedido. Así el Samsung y la webapp no se
 //     pisan al guardar la caja.
@@ -193,8 +194,32 @@ function crear({ config, log, baileys, logger, getSock }) {
       return 0;
     }
     log(`Yapes: + S/ ${monto.toFixed(2)} (${origen}) en la lista del día`);
+    // Avisos según las cajas abiertas hoy (la webapp decide a cuál va:
+    // la abierta a esa hora, la más reciente; sin ninguna, la próxima del día)
+    let abiertas = [];
+    try { abiertas = await cajasAbiertasHoy(); } catch (e) { log('Yapes: no se pudo ver las cajas:', e.message); }
+    if (!abiertas.length) {
+      await reaccionar(m, '🕓');
+      await responder(m, `🕓 S/ ${monto.toFixed(2)} guardado. No hay caja abierta: se sumará solo a la próxima caja que se abra hoy.`);
+      return monto;
+    }
     await reaccionar(m, '✅');
+    if (abiertas.length > 1 && Date.now() - ultimoAvisoDos > 30 * 60e3) {
+      ultimoAvisoDos = Date.now();
+      const masNueva = abiertas.slice().sort((x, y) => y.ap - x.ap)[0];
+      await responder(m, `⚠️ Hay ${abiertas.length} cajas abiertas (${abiertas.map(c => c.nombre).join(', ')}). ` +
+        `Los yapes van a la más reciente (${masNueva.nombre}). Cierren la que sobra.`);
+    }
     return monto;
+  }
+
+  let ultimoAvisoDos = 0;
+  async function cajasAbiertasHoy() {
+    const hoy = fechaPE(new Date());
+    const snap = await db.collection('cajas').where('cajaAbierta', '==', true).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(c => !c.eliminada && c.aperturaFecha && fechaPE(new Date(c.aperturaFecha)) === hoy)
+      .map(c => ({ nombre: c.nombre || c.id, ap: new Date(c.aperturaFecha).getTime() }));
   }
 
   // ── Mensajes del grupo ──────────────────────────────────────────────
