@@ -17,6 +17,11 @@
 //     ("25.50", "S/ 25.50") también se agrega.
 //
 //  Las fotos no se guardan en ningún lado: se leen y se descartan.
+//  EXCEPCIÓN (anticaída, 14/11/2026): si Claude está caído o sin sesión, la
+//  foto se guarda en alertas/yapes-caida/ con ⏳, se reintenta sola cada
+//  10 min y al leerse se suma como siempre (✅) y se borra. Un solo aviso
+//  al grupo por caída. La reconexión de la sesión la hace el bot de pagos
+//  del Poco (avisa con enlace en REPORTES CLAUDE).
 // ════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -27,6 +32,10 @@ const { execFile } = require('child_process');
 
 const TZ = 'America/Lima';
 const PROCESADOS = path.join(__dirname, 'yapes-procesados.json');
+const CAIDA      = path.join(__dirname, 'yapes-caida');
+const REINTENTO_MS = 10 * 60e3;
+// Errores de Claude que no son de la foto sino del servicio (caído, sin sesión, límite, sin internet)
+const ERROR_SERVICIO = /authenticat|oauth|not logged|login|401|overload|\b5\d\d\b|529|tardó|timeout|ECONN|ENOTFOUND|EAI_AGAIN|network|fetch failed|socket|\b429\b|rate.?limit|usage limit|limit reached/i;
 const ADC_FILE   = path.join(__dirname, 'credencial-gmail.json');
 const FIREBASE_TOOLS_STORE = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json');
 // Cliente OAuth público de firebase-tools (igual que servidor.js)
@@ -251,18 +260,28 @@ function crear({ config, log, baileys, logger, getSock }) {
 
     if (!c.imageMessage) return;
     marcar(m.key.id);
-    let r;
+    let r, buf;
+    const mime = c.imageMessage.mimetype || 'image/jpeg';
     try {
       const sock = getSock();
-      const buf = await downloadMediaMessage(m, 'buffer', {},
+      buf = await downloadMediaMessage(m, 'buffer', {},
         { logger, reuploadRequest: sock ? sock.updateMediaMessage : undefined });
       if (buf.length > MAX_FOTO) throw new Error('foto demasiado grande');
-      r = await leerMonto(buf, c.imageMessage.mimetype || 'image/jpeg');
+      if (tieneCaida()) { await guardarEnCaida(m, buf, mime); return; }   // hay cola: esta espera su turno
+      r = await leerMonto(buf, mime);
     } catch (e) {
       log('Yapes: error leyendo la foto:', e.message);
+      if (buf && /^claude:/.test(e.message) && ERROR_SERVICIO.test(e.message)) {
+        await guardarEnCaida(m, buf, mime);
+        return;
+      }
       await responder(m, '⚠️ No pude leer esta foto. Escribe el monto aquí (ej. 25.50).');
       return;
     }
+    return resultadoFoto(m, r);
+  }
+
+  async function resultadoFoto(m, r) {
     const monto = typeof r.monto === 'number' ? Math.round(r.monto * 100) / 100 : 0;
     if (!r.es_comprobante) { log('Yapes: la foto no es un comprobante, se ignora'); return; }
     if (!r.legible || !(monto > 0) || monto > 99999) {
@@ -272,6 +291,64 @@ function crear({ config, log, baileys, logger, getSock }) {
     }
     return sumar(m, monto, 'foto');
   }
+
+  // ── Cola de caída ───────────────────────────────────────────────────
+  let avisoCaida = false, ultimoReintento = Date.now();
+  function itemsCaida() {
+    try { return fs.readdirSync(CAIDA).filter(x => fs.existsSync(path.join(CAIDA, x, 'mensaje.json'))).sort(); } catch (e) { return []; }
+  }
+  function tieneCaida() { return itemsCaida().length > 0; }
+
+  async function guardarEnCaida(m, buf, mime) {
+    const ts = Number(m.messageTimestamp || 0) || Math.floor(Date.now() / 1000);
+    const dir = path.join(CAIDA, `${ts}-${m.key.id}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'foto'), buf);
+    fs.writeFileSync(path.join(dir, 'mensaje.json'), JSON.stringify({ key: m.key, messageTimestamp: ts, mime }));
+    log('Yapes: Claude no responde — foto guardada en la cola de caída');
+    await reaccionar(m, '⏳');
+    if (!avisoCaida) {
+      avisoCaida = true;
+      await responder(m, '⏳ El lector automático de yapes está caído por ahora. Guardo las fotos (⏳) y las sumo solas apenas vuelva (les pondré ✅). *No las escriban a mano*, para no duplicarlas.');
+    }
+  }
+
+  async function reintentarCaida() {
+    const items = itemsCaida();
+    if (!items.length) return;
+    let sumados = 0;
+    for (const x of items) {
+      const dir = path.join(CAIDA, x);
+      let meta, r;
+      try {
+        meta = JSON.parse(fs.readFileSync(path.join(dir, 'mensaje.json'), 'utf8'));
+        r = await leerMonto(fs.readFileSync(path.join(dir, 'foto')), meta.mime);
+      } catch (e) {
+        if (!meta) { fs.rmSync(dir, { recursive: true, force: true }); continue; }
+        if (ERROR_SERVICIO.test(e.message)) { log('Yapes: Claude sigue sin responder; reintento en 10 min'); return; }
+        log('Yapes: foto de la cola de caída no se pudo leer:', e.message);
+        r = { es_comprobante: true, legible: false, monto: null };
+      }
+      // mensaje mínimo para reaccionar/responder sobre la foto original
+      const m = { key: meta.key, messageTimestamp: meta.messageTimestamp, message: { conversation: '📷 yape' } };
+      const monto = await resultadoFoto(m, r);
+      if (monto > 0) {
+        sumados++;
+        const fecha = fechaPE(new Date(meta.messageTimestamp * 1000));
+        if (fecha !== fechaPE(new Date())) {
+          await responder(m, `⚠️ Este yape (S/ ${monto.toFixed(2)}) es del ${fecha.split('-').reverse().join('/')} y se leyó tarde por la caída. Si esa caja ya se cerró, agréguenlo a mano.`);
+        }
+      }
+      fs.rmSync(dir, { recursive: true, force: true });   // la foto se borra al terminar
+    }
+    avisoCaida = false;
+    log(`Yapes: el lector volvió; ${sumados} yape(s) de la cola de caída sumados`);
+  }
+  setInterval(() => {
+    if (Date.now() - ultimoReintento < (config.reintentoCaidaMs || REINTENTO_MS) || !tieneCaida()) return;
+    ultimoReintento = Date.now();
+    fila = fila.then(reintentarCaida).catch(e => log('Yapes: error en la cola de caída:', e.message));
+  }, 30e3);
 
   // Un mensaje a la vez: dos yapes seguidos no se pisan al escribir la caja
   let fila = Promise.resolve();
