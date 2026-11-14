@@ -90,6 +90,10 @@ let _egresoscajaCache = [];
 let _flujoDocCache    = {};
 let _flujoCharts      = {};
 
+// Aperturas físicas con caja cerrada — colección Firestore compartida entre todas las cajas del día
+let _aperturasFisicasDia       = [];
+let _aperturasFisicasCacheFecha = null;
+
 // ============================================================
 //  INIT
 // ============================================================
@@ -506,9 +510,9 @@ function _el(id) {
 }
 
 // ── Apertura de gaveta POS-D via protocolo cajaabierta:// ────
-function _registrarAperturaCaja({ motivo, tipo }) {
+function _registrarAperturaCaja({ motivo, tipo, periodo }) {
   if (!Array.isArray(state.aperturasCaja)) state.aperturasCaja = [];
-  state.aperturasCaja.push({ motivo, tipo, fecha: new Date().toISOString() });
+  state.aperturasCaja.push({ motivo, tipo, periodo: periodo || null, fecha: new Date().toISOString() });
   saveState();
   _renderAperturasCaja();
   _rcRenderAperturasEmp();
@@ -554,41 +558,69 @@ async function abrirCajaPOS() {
   }
 }
 
-function _ccUsadasHoy() {
+// Devuelve 'manana' (antes de mediodía) o 'tarde' (desde mediodía) en hora peruana
+function _periodoActualPE() {
+  const hora = parseInt(
+    new Date().toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', hour12: false }), 10
+  );
+  return hora < 12 ? 'manana' : 'tarde';
+}
+
+// Carga (o refresca) las aperturas físicas con caja cerrada del día desde Firestore
+async function _cargarAperturasFisicasDia(force = false) {
   const hoy = _todayPE();
-  const fromState = (state.aperturasCaja || []).filter(a =>
-    a.tipo === 'fisica-cerrada' &&
+  if (!force && _aperturasFisicasCacheFecha === hoy) return;
+  try {
+    const snap = await db.doc(`aperturasFisicasDia/${hoy}`).get();
+    _aperturasFisicasDia        = snap.exists ? (snap.data().aperturas || []) : [];
+    _aperturasFisicasCacheFecha = hoy;
+  } catch(e) { /* conservar caché existente ante error de red */ }
+}
+
+// Persiste una apertura con caja cerrada en la colección compartida del día
+async function _guardarAperturaFisicaCerrada(motivo) {
+  const hoy    = _todayPE();
+  const entrada = {
+    motivo,
+    tipo:    'fisica-cerrada',
+    periodo: _periodoActualPE(),
+    fecha:   new Date().toISOString(),
+    uid:     auth.currentUser?.uid || '',
+  };
+  await db.doc(`aperturasFisicasDia/${hoy}`).set(
+    { aperturas: firebase.firestore.FieldValue.arrayUnion(entrada) },
+    { merge: true }
+  );
+  if (_aperturasFisicasCacheFecha === hoy) _aperturasFisicasDia.push(entrada);
+}
+
+// Cuántas aperturas con caja cerrada se usaron en el periodo actual (mañana o tarde)
+// Suma: las de la colección compartida + las que pudieran quedar en state de alguna caja abierta
+function _ccUsadasEnPeriodo(periodo) {
+  const hoy        = _todayPE();
+  const fromCache  = _aperturasFisicasDia.filter(a => a.periodo === periodo).length;
+  const fromState  = (state.aperturasCaja || []).filter(a =>
+    a.tipo === 'fisica-cerrada' && a.periodo === periodo &&
     a.fecha && new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(a.fecha)) === hoy
   ).length;
-  const fromLocal = parseInt(localStorage.getItem(`ccAperturas_${hoy}`) || '0');
-  return fromState + fromLocal;
+  return fromCache + fromState;
 }
 
-function _ccLogHoy() {
-  const hoy = _todayPE();
-  try { return JSON.parse(localStorage.getItem(`ccAperturasLog_${hoy}`) || '[]'); }
-  catch (_) { return []; }
-}
-
-function _ccLogPush(entry) {
-  const hoy = _todayPE();
-  const list = _ccLogHoy();
-  list.push(entry);
-  localStorage.setItem(`ccAperturasLog_${hoy}`, JSON.stringify(list));
-}
-
-function _actualizarContadorCC() {
+async function _actualizarContadorCC() {
+  await _cargarAperturasFisicasDia(true);
   const el  = document.getElementById('empCerradaContador');
   const btn = document.getElementById('btnAbrirCC');
   if (!el) return;
-  const usadas    = _ccUsadasHoy();
+  const periodo   = _periodoActualPE();
+  const usadas    = _ccUsadasEnPeriodo(periodo);
   const restantes = 3 - usadas;
-  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles hoy` : '0/3 — límite alcanzado';
+  const label     = periodo === 'manana' ? 'esta mañana' : 'esta tarde';
+  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles ${label}` : `0/3 — límite de ${label} alcanzado`;
   el.style.color  = restantes > 0 ? '#6b7280' : '#dc2626';
   if (btn) btn.disabled = restantes <= 0;
 }
 
-function abrirGavetaCajaCerrada() {
+async function abrirGavetaCajaCerrada() {
   const motInp = document.getElementById('posMotivoCC');
   const fb     = document.getElementById('empCerradaFeedback');
   const motivo = (motInp?.value || '').trim();
@@ -599,9 +631,12 @@ function abrirGavetaCajaCerrada() {
   }
   if (motInp) motInp.style.borderColor = '';
 
-  const usadas = _ccUsadasHoy();
+  await _cargarAperturasFisicasDia(true);
+  const periodo = _periodoActualPE();
+  const usadas  = _ccUsadasEnPeriodo(periodo);
   if (usadas >= 3) {
-    if (fb) fb.textContent = '⚠ Límite alcanzado: ya abriste la gaveta 3 veces hoy.';
+    const label = periodo === 'manana' ? 'mañana' : 'tarde';
+    if (fb) fb.textContent = `⚠ Límite de ${label} alcanzado: ya abriste la gaveta 3 veces.`;
     return;
   }
 
@@ -618,19 +653,18 @@ function abrirGavetaCajaCerrada() {
   } catch(e) {}
 
   if (currentCajaId) {
-    _registrarAperturaCaja({ motivo, tipo: 'fisica-cerrada' });
+    _registrarAperturaCaja({ motivo, tipo: 'fisica-cerrada', periodo });
   } else {
-    const hoy = _todayPE();
-    _ccLogPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString() });
-    localStorage.setItem(`ccAperturas_${hoy}`, String(usadas + 1));
+    await _guardarAperturaFisicaCerrada(motivo);
   }
   if (motInp) motInp.value = '';
 
   const restantes = 2 - usadas;
+  const label     = periodo === 'manana' ? 'mañana' : 'tarde';
   if (fb) {
     fb.textContent = restantes > 0
-      ? `✔ Gaveta abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} hoy`
-      : '✔ Gaveta abierta — límite del día alcanzado';
+      ? `✔ Gaveta abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} de ${label}`
+      : `✔ Gaveta abierta — límite de ${label} alcanzado`;
     setTimeout(() => { if (fb) fb.textContent = ''; }, 3000);
   }
   _actualizarContadorCC();
@@ -640,36 +674,40 @@ function abrirGavetaCajaCerrada() {
 function _renderSelectorCCList() {
   const el = document.getElementById('selectorCCList');
   if (!el) return;
-  const list = _ccLogHoy();
+  const list = _aperturasFisicasDia;
   if (list.length === 0) { el.innerHTML = ''; return; }
   el.innerHTML =
     '<div style="font-size:12px;color:#6b7280;margin-bottom:4px">Aperturas de hoy</div>' +
     list.map((a, i) => {
-      const d = new Date(a.fecha);
+      const d    = new Date(a.fecha);
       const hora = d.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+      const per  = a.periodo === 'manana' ? 'Mañana' : 'Tarde';
       return `<div style="display:flex;justify-content:space-between;align-items:center;
                           padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
         <span style="color:#374151;min-width:0;overflow:hidden;text-overflow:ellipsis">
-          ${i+1}. <span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada</span>${escHtml(a.motivo)}
+          ${i+1}. <span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada · ${per}</span>${escHtml(a.motivo)}
         </span>
         <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
       </div>`;
     }).join('');
 }
 
-function _actualizarContadorSelectorCC() {
+async function _actualizarContadorSelectorCC() {
+  await _cargarAperturasFisicasDia(true);
   const el  = document.getElementById('selectorCCContador');
   const btn = document.getElementById('btnAbrirSelectorCC');
   if (!el) return;
-  const usadas    = _ccUsadasHoy();
+  const periodo   = _periodoActualPE();
+  const usadas    = _ccUsadasEnPeriodo(periodo);
   const restantes = 3 - usadas;
-  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles hoy` : '0/3 — límite alcanzado';
+  const label     = periodo === 'manana' ? 'esta mañana' : 'esta tarde';
+  el.textContent  = restantes > 0 ? `${restantes}/3 disponibles ${label}` : `0/3 — límite de ${label} alcanzado`;
   el.style.color  = restantes > 0 ? '#6b7280' : '#dc2626';
   if (btn) btn.disabled = restantes <= 0;
   _renderSelectorCCList();
 }
 
-function abrirCajaSinCajaActiva() {
+async function abrirCajaSinCajaActiva() {
   const motInp = document.getElementById('selectorMotivoCC');
   const fb     = document.getElementById('selectorCCFeedback');
   const motivo = (motInp?.value || '').trim();
@@ -680,9 +718,12 @@ function abrirCajaSinCajaActiva() {
   }
   if (motInp) motInp.style.borderColor = '';
 
-  const usadas = _ccUsadasHoy();
+  await _cargarAperturasFisicasDia(true);
+  const periodo = _periodoActualPE();
+  const usadas  = _ccUsadasEnPeriodo(periodo);
   if (usadas >= 3) {
-    if (fb) fb.textContent = '⚠ Límite alcanzado: ya abriste la caja 3 veces hoy.';
+    const label = periodo === 'manana' ? 'mañana' : 'tarde';
+    if (fb) fb.textContent = `⚠ Límite de ${label} alcanzado: ya abriste la caja 3 veces.`;
     _actualizarContadorSelectorCC();
     return;
   }
@@ -699,16 +740,15 @@ function abrirCajaSinCajaActiva() {
     document.body.removeChild(a);
   } catch (_) {}
 
-  const hoy = _todayPE();
-  _ccLogPush({ motivo, tipo: 'fisica-cerrada', fecha: new Date().toISOString() });
-  localStorage.setItem(`ccAperturas_${hoy}`, String(usadas + 1));
+  await _guardarAperturaFisicaCerrada(motivo);
 
   if (motInp) motInp.value = '';
   const restantes = 2 - usadas;
+  const label     = periodo === 'manana' ? 'mañana' : 'tarde';
   if (fb) {
     fb.textContent = restantes > 0
-      ? `✔ Caja abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} hoy`
-      : '✔ Caja abierta — límite del día alcanzado';
+      ? `✔ Caja abierta — quedan ${restantes} apertura${restantes !== 1 ? 's' : ''} de ${label}`
+      : `✔ Caja abierta — límite de ${label} alcanzado`;
     setTimeout(() => { if (fb) fb.textContent = ''; }, 3000);
   }
   _actualizarContadorSelectorCC();
@@ -733,17 +773,20 @@ function registrarAperturaSinAbrir() {
 }
 
 function _renderAperturasCaja() {
-  const lista = state.aperturasCaja || [];
+  const listaCerradas = _aperturasFisicasDia;
+  const listaCaja     = state.aperturasCaja || [];
+  const lista = [...listaCerradas, ...listaCaja].sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
   const html = lista.length === 0
     ? '<p style="color:#9ca3af;font-size:13px">Sin aperturas registradas.</p>'
     : lista.map((a, i) => {
         const d     = new Date(a.fecha);
         const fecha = d.toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit' });
         const hora  = d.toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+        const per   = a.periodo === 'manana' ? ' · Mañana' : a.periodo === 'tarde' ? ' · Tarde' : '';
         const badge = a.tipo === 'registro'
           ? '<span style="background:#e5e7eb;color:#374151;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">📝 Registro</span>'
           : a.tipo === 'fisica-cerrada'
-            ? '<span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada</span>'
+            ? `<span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔒 C.Cerrada${per}</span>`
             : '<span style="background:#dcfce7;color:#166534;font-size:11px;padding:1px 6px;border-radius:10px;margin-right:6px">🔓 Gaveta</span>';
         return `<div style="display:flex;justify-content:space-between;align-items:center;
                             padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
@@ -754,8 +797,7 @@ function _renderAperturasCaja() {
         </div>`;
       }).join('');
 
-  const emp   = document.getElementById('empAperturasCajaList');
-  const admin = document.getElementById('adminAperturasCajaList');
+  const emp = document.getElementById('empAperturasCajaList');
   if (emp) emp.innerHTML = lista.length === 0 ? '' : html;
 }
 
@@ -952,7 +994,7 @@ function _buildBorradorDoc() {
     yapesRaw:        state.yapesRaw        || '',
     totalYapes:      _calcTotalYapesFromRaw(state.yapesRaw),
     eventos:         state.eventos         || [],
-    aperturasCaja:   state.aperturasCaja   || [],
+    aperturasCaja:   [..._aperturasFisicasDia, ...(state.aperturasCaja || [])].sort((a, b) => new Date(a.fecha) - new Date(b.fecha)),
     rcRegistros:     state.rcRegistros     || [],
   };
 }
@@ -2421,7 +2463,7 @@ function toggleListaAperturas() {
   if (!lista) return;
   const visible = lista.style.display !== 'none';
   lista.style.display = visible ? 'none' : '';
-  const n = (state.aperturasCaja || []).length;
+  const n = (state.aperturasCaja || []).length + _aperturasFisicasDia.length;
   if (btn) btn.textContent = visible ? `▼ Ver lista (${n})` : `▲ Ocultar (${n})`;
 }
 
@@ -2439,11 +2481,14 @@ async function refreshAperturasEmp() {
   if (btn) { btn.disabled = false; btn.textContent = '↻ Actualizar'; }
 }
 
-function _rcRenderAperturasEmp() {
+async function _rcRenderAperturasEmp() {
   const el  = document.getElementById('rcAperturasEmpList');
   const btn = document.getElementById('btnToggleAperturasRc');
   if (!el) return;
-  const lista = (state.aperturasCaja || []);
+  await _cargarAperturasFisicasDia();
+  const listaCerradas = _aperturasFisicasDia;
+  const listaCaja     = state.aperturasCaja || [];
+  const lista = [...listaCerradas, ...listaCaja].sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
   if (lista.length === 0) {
     el.innerHTML = '<span style="color:#9ca3af">Sin aperturas registradas.</span>';
     el.style.display = 'none';
@@ -2452,8 +2497,12 @@ function _rcRenderAperturasEmp() {
   }
   el.innerHTML = lista.map((a, i) => {
     const hora = new Date(a.fecha).toLocaleTimeString('es-PE', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const per  = a.periodo === 'manana' ? ' · Mañana' : a.periodo === 'tarde' ? ' · Tarde' : '';
+    const badge = a.tipo === 'fisica-cerrada'
+      ? `<span style="background:#fef3c7;color:#92400e;font-size:11px;padding:1px 5px;border-radius:10px;margin-right:4px">🔒 C.Cerrada${per}</span>`
+      : '';
     return `<div style="padding:5px 0;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between">
-      <span style="color:#374151">${i+1}. ${escHtml(a.motivo)}</span>
+      <span style="color:#374151">${i+1}. ${badge}${escHtml(a.motivo)}</span>
       <span style="color:#6b7280;white-space:nowrap;margin-left:10px">${hora}</span>
     </div>`;
   }).join('') + `<div style="padding-top:6px;font-weight:600;color:#1a6b3c">Total: ${lista.length}</div>`;
@@ -2484,7 +2533,7 @@ function _rcMostrarDatos(data, fecha, btn) {
   const cajaTimes   = Array.isArray(data.times) ? data.times : [];
   _rcCajaTimes      = cajaTimes;
   const aperturasBat = cajaTimes.length;
-  const aperturasEmp = (state.aperturasCaja || []).length;
+  const aperturasEmp = (state.aperturasCaja || []).length + _aperturasFisicasDia.length;
 
   if (aperturasBat === 0) {
     _rcSetMsg(`Sin aperturas registradas en TROEFAE para el ${fecha}.`, false);
@@ -2565,7 +2614,7 @@ function rcRegistrarComprobantes() {
   if (isNaN(comprobantes) || comprobantes < 0) { if (input) input.focus(); return; }
 
   const aperturasBat = (_rcCajaTimes || []).length;
-  const aperturasEmp = (state.aperturasCaja || []).length;
+  const aperturasEmp = (state.aperturasCaja || []).length + _aperturasFisicasDia.length;
   const esperado     = comprobantes + aperturasEmp;
   const diff         = aperturasBat - esperado;   // 0 = cuadra
 
@@ -2609,7 +2658,7 @@ function rcRegistrarManual() {
   if (isNaN(bat)  || bat  < 0) { batEl?.focus();  return; }
   if (isNaN(comp) || comp < 0) { compEl?.focus(); return; }
 
-  const aperturasEmp = (state.aperturasCaja || []).length;
+  const aperturasEmp = (state.aperturasCaja || []).length + _aperturasFisicasDia.length;
   const esperado     = comp + aperturasEmp;
   const diff         = bat - esperado;
 
